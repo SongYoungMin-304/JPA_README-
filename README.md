@@ -12,21 +12,28 @@ JPA_README 정리
      (MYBATIS 등 처리 직접 쿼리를 생성해 DB에 날리지 않고 객체를 DB에 맞춰서 설계한 이후
       객체를 통해 쿼리를 실행한다.)
 
-https://www.notion.so/JPA-94f54dc559204c2ba984b78327600f18#594fcf62d546459397d3694656b6390a
+![1](https://user-images.githubusercontent.com/56577599/215508374-bd8e41ab-cc40-4f02-a51e-7169389f3caf.png)
+
 
 ## 도메인 모델과 테이블 설계
 
   **도메인 설계**
+  
+![2](https://user-images.githubusercontent.com/56577599/215508404-8a6b8c87-fac7-4876-867e-0477a0cacb62.png)
 
-https://www.notion.so/JPA-94f54dc559204c2ba984b78327600f18#c733a23e3be840b2894d998c403486fc
 
   **객체 설계**
+  
+![3](https://user-images.githubusercontent.com/56577599/215508448-61d68ef0-7ee7-40d7-8ee3-4fd3f6546445.png)
 
-https://www.notion.so/JPA-94f54dc559204c2ba984b78327600f18#6fb3471447ce4cd29ac75c5e89299c53
 
-**테이블 설계**
 
-https://www.notion.so/JPA-94f54dc559204c2ba984b78327600f18#87141619f68045d0b6b70ebd647ee3c8
+  **테이블 설계**
+  
+  ![4](https://user-images.githubusercontent.com/56577599/215508507-b44b9711-a937-4045-8b1d-1b6bfe9b0292.png)
+
+  
+
 
 `⭐` 엔티티를 설계할 때 주의 할 점
 
