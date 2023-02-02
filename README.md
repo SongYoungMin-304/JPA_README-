@@ -34,7 +34,6 @@ JPA_README 정리
 
   
 
-
 `⭐` 엔티티를 설계할 때 주의 할 점
 
 - one to many 단계에서는 many 가 연관관계의 **주인**
@@ -78,8 +77,10 @@ public class Address {
      private String city;
      private String street;
      private String zipcode;
+
      protected Address() {
      }
+
  public Address(String city, String street, String zipcode) {
      this.city = city;
      this.street = street;
@@ -87,6 +88,7 @@ public class Address {
  }
 }
 ```
+
 → Embeddable 은 protected 생성자 존재해야함
 
 **주문**
@@ -221,8 +223,26 @@ public abstract class Item {
  
      @ManyToMany(mappedBy = "items")
      private List<Category> categories = new ArrayList<Category>();
+
+     //==비즈니스 로직==//
+     public void addStock(int quantity) {
+        this.stockQuantity += quantity;
+     }
+ 
+     public void removeStock(int quantity) {
+        int restStock = this.stockQuantity - quantity;
+ 
+        if (restStock < 0) {
+           throw new NotEnoughStockException("need more stock");
+        }
+        
+        this.stockQuantity = restStock;
+     }
 }
 ```
+
+- 연관관계 메소드를 통해서 엔티티의 재고를 변경
+- 재고의 숫자를 늘리기 및 내리기 처리 가능
 
 **상품 - 도서 엔티티**
 
@@ -448,4 +468,155 @@ System.out.println(member.getOrders().getClass());
 //출력 결과
 class java.util.ArrayList
 class org.hibernate.collection.internal.PersistentBag
+```
+
+`⭐` 지연 로딩 시 주의 할 점
+
+- 연관 관계에서는 연관관계의 주인이 필요하다. 일반적으로 외래키를 가지고 있는 테이블(엔티티)가 연관관계의 주인이다.
+
+Delivery 엔티티
+
+```java
+ public class Delivery {
+
+    @Id
+    @GeneratedValue
+    @Column(name ="delivery_id")
+    private Long id;
+
+    @JsonIgnore
+    @OneToOne(mappedBy = "delivery", fetch = LAZY)
+    private Order order;
+}
+```
+
+Order 엔티티
+
+```java
+public class Order {
+
+    @Id @GeneratedValue
+    @Column(name ="order_id")
+    private Long id;
+
+    @OneToOne(fetch = LAZY) // cascade 로 order 가 저장될때 orderItem 도 같이 저장됨... 라이프 사이클에서 delivery// 을 건드는 경우가 order 만 인 경우
+    @JoinColumn(name ="delivery_id")
+    private Delivery delivery;
+}
+```
+
+→ em.find(Delivery.class, 3L) 등으로 엔티티를 가져올 때 
+
+DELIVERY 를 가져오는 쿼리  + Order 를 가져오는 쿼리 두번이 실행된다.
+
+→ em.find(Order.class, 3L) 등으로 엔티티를 가져올 때 
+
+ Order 를 가져오는 쿼리 한번만 실행된다.
+
+** 이유는 
+
+→ 우선 DB 상으로 볼때 
+
+```sql
+create table delivery (
+        delivery_id number(19,0) not null,
+        primary key (delivery_id)
+    )
+
+create table orders (
+        order_id number(19,0) not null,
+        member_id number(19,0),
+        primary key (order_id)
+    )
+
+alter table orders 
+       add constraint FKtkrur7wg4d8ax0pwgo0vmy20c 
+       foreign key (delivery_id) 
+       references delivery
+```
+
+→ ORDER는 무조건 delivery 를 가지고 있다는 것을 의미한다.
+즉 **order가 있는 데 delivery 가 없을 수 는 없기 때문에 delivery 엔티티가 있다는 것이 보장되**기 때문에 proxy로 처리할 수 가 있다.
+
+### **—> 즉 지연로딩이 가능하다는 것이다.**
+
+→ delivery 가 있다고 무조건 order 가 있다는 것을 의미하지 않기 때문에(db 상에서 문제가 없음) 
+
+proxy로 처리할 수 가 없기 때문에 (null 일 수도 있어서)  
+
+### **—> 즉 지연로딩이 처리가 안되고 즉시 연동처리가 됨**
+
+### 그러면 모든 주인이 아닌 엔티티에서는 주인 엔티티를 조회 할 수 없는가?
+
+### 결론은 아니다.!  oneToMany 경우에서는 List 객체를 가지고 있기 때문에 null 이 아니라고 판단하고 지연로딩이 된다.
+
+## **즉 1대1관계에서 주인이 아닌 경우에는 왠만하면 단방향으로 설계하는 것이 좋다.**
+
+---
+
+## 기능 구현
+
+**회원 엔티티 기능**
+
+```sql
+@Repository
+public class MemberRepository {
+
+ @PersistenceContext
+
+     private EntityManager em;
+
+     public void save(Member member) {
+        em.persist(member);
+     }
+
+     public Member findOne(Long id) {
+        return em.find(Member.class, id);
+     }
+
+     public List<Member> findAll() {
+        return em.createQuery("select m from Member m", Member.class)
+               .getResultList();
+     }
+
+     public List<Member> findByName(String name) {
+        return em.createQuery("select m from Member m where m.name = :name",
+              Member.class)
+             .setParameter("name", name)
+             .getResultList();
+ }
+}
+```
+
+→ persist 기능 - 저장
+
+→ find 기능 - 조회 기능
+
+→ createQuery - jpql을 통해서 쿼리 생성해서 키 값 말고도 조회 가능
+
+상품 **엔티티 기능**
+
+```sql
+@Repository
+@RequiredArgsConstructor
+public class ItemRepository {
+
+      private final EntityManager em;
+      
+      public void save(Item item) {
+        if (item.getId() == null) {
+                 em.persist(item);
+        } else {
+                 em.merge(item);
+        }
+        }
+
+      public Item findOne(Long id) {
+          return em.find(Item.class, id);
+        }
+
+      public List<Item> findAll() {
+         return em.createQuery("select i from Item i",Item.class).getResultList();
+ }
+}
 ```
