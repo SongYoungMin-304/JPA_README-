@@ -32,9 +32,7 @@ JPA_README 정리
   
   ![4](https://user-images.githubusercontent.com/56577599/215508507-b44b9711-a937-4045-8b1d-1b6bfe9b0292.png)
 
-  
-
-`⭐` 엔티티를 설계할 때 주의 할 점
+  `⭐` 엔티티를 설계할 때 주의 할 점
 
 - one to many 단계에서는 many 가 연관관계의 **주인**
 - one to one 또는 many to many 에서는 외래키가 존재하는 부분이 **주인**
@@ -134,6 +132,41 @@ public class Order {
          this.delivery = delivery;
          delivery.setOrder(this);
      }
+
+     //==생성 메서드==//
+     public static createOrder(Member member, Delivery delivery, OrderItem... orderItems){
+          Order order = new Order();
+          order.setMember(member);
+          order.setDelivery(delivery);
+          for(OrderItem orderItem : orderItems){
+             order.addOrderItem(orderItem);
+          }
+          order.setStatus(OrderStatus.ORDER);
+          order.setOrderDate(LocalDateTeim.now());
+          return order;
+     }
+
+     //==비즈니스 로직==//
+     /** 주문 취소 */
+     public void cancel(){
+          if(delivery.getStatus() == DeliveryStatus.COMP){
+                 throw new IllegalStateException("이미 배송완료된 상품은 취소가 불가능합니다.");
+          }
+          
+          this.setStatus(OrderStatus.CANCEL);
+          for(OrderItem orderItem : orderItems){
+            orderItem.cancel();
+          }
+        }
+  
+     public int getTotalPrice(){
+         int totalPrice = 0;
+         for(OrderItem orderItem : orderItems){
+             totalPrice += orderItem.getTotalPrice();
+         }
+         return totalPrice;
+      }
+         
 }
 ```
 
@@ -141,7 +174,21 @@ public class Order {
 
 → EnumType 열거형 사용
 
-→ CascadeType 이란?(연관관계 관련 처리)
+### **생성 메소드(createOrder)**
+
+**→ order에다가 member, delivery, orderItem 세팅, status, orderDate 값 세팅**
+**(orderItem 이랑 delivery 값이 cascade 로 세팅 되어있기 떄문에 order를 저장하면 orderItem, delivery 또한 저장됨)**
+
+### 주문 취소**(**cancel**)**
+
+**→ order에다가 상태값 세팅, orderItem cancel 로직 적용**
+**(orderItem cancel 로직은 아래 내용 확인)**
+
+### 총 금액 합계 구하기**(getTotalPrice)**
+
+**→ orderItem for문 돌리면서 금액 합쳐서 return** 
+
+## ** CascadeType 이란?(연관관계 관련 처리)
 
 ```java
 Order order = ~~~
@@ -195,12 +242,47 @@ public class OrderItem {
  
     private int orderPrice; //주문 가격
     private int count; //주문 수량
+
+    //==생성 메서드==//
+    public static OrderItem createOrderItem(Item item, int orderPrice, int count){
+         OrderItem orderItem = new OrderItem();
+         orderItem.setItem(item);
+         orderItem.setOrderPrice(orderPrice);
+         orderItem.setCount(count);
+
+         item.removeStock(count);
+         return orderItem;
+         }
+
+    //==비즈니스 로직==//
+    /** 주문 취소 */
+    public void cancel(){
+        getItem().addStock(count);
+    }
+
+    //==조회로직==//
+    public int getTotalPrice(){
+         return getOrderPrice() * getCount();
+    }
+
 }
 ```
 
 → ManyToOne 방식으로 item과 order에 연관 처리
 
 → ManyToOne 은 기본적으로 즉시 로딩이여서 지연 로딩으로 처리해야함
+
+### **생성 메소드(createOrderItem)**
+
+**→ orderItem 에다가 item 세팅해주고 금액과 갯수를 세팅 item 의 재고를 감소 시켜준다.**
+
+### 주문 취소**(**cancel**)**
+
+**→ item을 가져와서 재고를 더해준다.**
+
+### 조회 로직**(getTotalPrice)**
+
+**→ orderPrice 를 가져오고 count를 가져와서 곱한다…**
 
 **상품 엔티티**
 
@@ -556,7 +638,7 @@ proxy로 처리할 수 가 없기 때문에 (null 일 수도 있어서)
 
 ## 기능 구현
 
-**회원 엔티티 기능**
+**회원 기능**
 
 ```sql
 @Repository
@@ -594,7 +676,47 @@ public class MemberRepository {
 
 → createQuery - jpql을 통해서 쿼리 생성해서 키 값 말고도 조회 가능
 
-상품 **엔티티 기능**
+```java
+@Service
+@Transactional(readOnly = true)
+@RequiredArgsConstructor
+public class MemberService {
+ 
+     private final MemberRepository memberRepository;
+     /**
+      * 회원가입
+      */
+ 
+     @Transactional //변경
+     public Long join(Member member) {
+         validateDuplicateMember(member); //중복 회원 검증
+         memberRepository.save(member);
+         return member.getId();
+     }
+     
+     private void validateDuplicateMember(Member member) {
+         List<Member> findMembers =
+         memberRepository.findByName(member.getName());
+ 
+        if (!findMembers.isEmpty()) {
+             throw new IllegalStateException("이미 존재하는 회원입니다.");
+         }
+     }
+     /**
+     * 전체 회원 조회
+     */
+ public List<Member> findMembers() {
+         return memberRepository.findAll();
+ }
+ 
+ public Member findOne(Long memberId) {
+         return memberRepository.findOne(memberId);
+ }
+
+}
+```
+
+**상품 기능**
 
 ```sql
 @Repository
@@ -620,3 +742,118 @@ public class ItemRepository {
  }
 }
 ```
+
+```java
+@Service
+@Transactional(readOnly = true)
+@RequiredArgsConstructor
+public class ItemService {
+ 
+    private final ItemRepository itemRepository;
+ 
+    @Transactional
+    public void saveItem(Item item) {
+       itemRepository.save(item);
+    }
+ 
+    public List<Item> findItems() {
+       return itemRepository.findAll();
+    }
+ 
+    public Item findOne(Long itemId) {
+       return itemRepository.findOne(itemId);
+    }
+}
+```
+
+**주문 기능**
+
+```java
+@Repository
+@RequiredArgsConstructor
+public class OrderRepository {
+
+     private final EntityManager em;
+     
+    public void save(Order order) {
+         em.persist(order);
+     }
+
+     public Order findOne(Long id) {
+         return em.find(Order.class, id);
+     }
+
+// public List<Order> findAll(OrderSearch orderSearch) { ... }
+}
+```
+
+```java
+@Service
+@Transactional(readOnly = true)
+@RequiredArgsConstructor
+public class OrderService {
+
+     private final MemberRepository memberRepository;
+     private final OrderRepository orderRepository;
+     private final ItemRepository itemRepository;
+ 
+ /** 주문 */
+ @Transactional
+ public Long order(Long memberId, Long itemId, int count) {
+     //엔티티 조회
+     Member member = memberRepository.findOne(memberId);
+     Item item = itemRepository.findOne(itemId);
+ 
+     //배송정보 생성
+     Delivery delivery = new Delivery();
+     delivery.setAddress(member.getAddress());
+     delivery.setStatus(DeliveryStatus.READY);
+ 
+     //주문상품 생성
+     OrderItem orderItem = OrderItem.createOrderItem(item, item.getPrice(),
+count);
+     
+     //주문 생성
+     Order order = Order.createOrder(member, delivery, orderItem);
+ 
+     //주문 저장
+     orderRepository.save(order);
+     return order.getId();
+ }
+ 
+ /** 주문 취소 */
+ @Transactional
+ public void cancelOrder(Long orderId) {
+     //주문 엔티티 조회
+     Order order = orderRepository.findOne(orderId);
+     //주문 취소
+     order.cancel();
+ }
+ /** 주문 검색 */
+/*
+ public List<Order> findOrders(OrderSearch orderSearch) {
+ return orderRepository.findAll(orderSearch);
+ }
+*/
+}
+```
+
+### 주문 **생성 로직**
+
+1) memberId를 통해서 회원을 가져옴
+
+2) itemId를 통해서 아이템을 가져옴
+
+3) 배송 정보 세팅
+
+4) 주문상품 데이터 생성 OrderItem 비즈니스 로직 참조
+
+5) 주문생성 회원과 배송지와 orderItem 을 가지고 주문 생성
+
+(cascade로 delivery 와 orderItem 생성됨)
+
+### 주문 취소 **로직**
+
+1) 주문을 가져옴
+
+2) 주문의 비즈니스 취소 로직을 적용
