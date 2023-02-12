@@ -1093,3 +1093,454 @@ static class SimpleOrderDto{
 → 쿼리가 **주문 1번, 주문 횟수만큼 회원 조회, 주문횟수 만틈 배송 조회**
 
 → EX) 주문이 각자 다른 5명의 고객이면 쿼리가 1 + 5 + 5 총 11번 실행된다.
+
+
+
+### V3 - 엔티티를 DTO로 변환 - 페치 조인 최적화
+
+```java
+@GetMapping("/api/v2/simple-orders")
+public List<SimpleOrderDto> ordersV3(){
+     List<Order> orders = orderRepository.findAllWithMemberDelivery();
+     List<SimpleOrderDto> result = orders.stream()
+          .map(o -> new SimpleOrderDTO(o))
+          .collect(toList());
+     return result;
+}
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+public List<Order> findAllWithMemberDelivery() {
+     return em.createQuery(
+          "select o from Order o" +
+                  " join fetch o.member m" +
+                  " join fetch o.delivery d", Order.class)
+           .getResultList();
+```
+
+→ fetch join 를 사용해서 쿼리 1번 조회
+
+→ 페치조인으로 order → member, order → delivery 는 이미 조회된 상태여서 지연 로딩이 진행 되지 않음
+
+### V4 - JPA에서 DTO로 바로 조회
+
+```java
+@GetMapping("/api/v4/simple-orders")
+public List<OrderSimpleQueryDto) ordersV4() {
+    return orderSimpleQueryRepository.findOrderDtos();
+}
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+public List<OrderSimpleqQueryDto> findOrderDtos() { 
+     return em.createQuery(
+         "select new jpabook.jpashop.repository.order.simplequery.OrderSimpleQueryDto(o.id, m.name, o.orderDate, o.status, d.address)" + 
+                 " from Order o" +
+                 " join o.member m" +
+                 " join o.delivery d", OrderSimpleQueryDto.class)
+              .getResultList();
+       }
+
+```
+
+→ new 명령어를 사용해서 JPQL의 결과를 DTO로 즉시 변환
+
+→ SELECT 절에서 원하는 데이터를 직접 선택하므로 DB → 애플리케이션 네트웍 용량 최적화
+
+→ 영속성 사용 관리
+
+### 쿼리 방식 선택 권장 순서
+
+- 우선 엔티티를 DTO로 변환하는 방법 선택
+- 필요하면 페치 조인으로 성능을 최적화한다.
+- 그래도 안되면 DTO로 직접 조회
+- 최후의 방법 NATIVE QUERY
+
+### API 개발 고급 - 컬렉션 조회 최적화
+
+### V1- 엔티티 직접 노출
+
+```java
+@GetMapping("/api/v1/orders")
+public List<Order> ordersV1(){
+     List<Order> all = orderRepository.findAllByString(new OrderSearch());
+     for(Order order : all) {
+           order.getMember().getName();
+           order.getDelivery().getAddress();
+           List<OrderItem> orderItems = order.getOrderItems();
+           orderItems.stream().forEach(o -> o.getItem.getName()_'
+     }
+     return all;
+}
+
+```
+
+ → 엔티티를 직접 노출
+
+→ 지연 로딩에 대한 세팅 진행
+
+### V2- 엔티티를  DTO로 변환
+
+```java
+@GetMapping("/api/v2/orders")
+public List<OrderDto> ordersV2(){
+    List<Order> orders = orderRepository.findAll();
+    List<OrderDto> result = orders.stream()
+           .map(o -> new OrderDto(o))
+           .collect(toList());
+    return result;
+}
+
+@Data
+static class OrderDto { 
+
+     private Long orderId;
+     private String name;
+     private LocalDateTime orderDate;
+     private OrderStatus orderStatus;
+     private Address address;
+     private List<OrderItemDto> orderItems;
+
+public OrderDto(Order order){
+    orderId = order.getId();
+    name = order.getMember().getName();
+    orderDate = order.getOrderDate();
+    orderStatus = order.getStatus();
+    address = order.getDelivery().getAddress();
+    orderItems = order.getOrderItems().stream()
+                   .map(orderItem -> new OrderItemDto(orderItem))
+                   .collect(toList());
+}
+
+@Data
+static class OrderItemDto {
+    private String itemName;//상품 명
+    private int orderPrice; //주문 가격
+    private int count; //주문 수량
+ public OrderItemDto(OrderItem orderItem) {
+     itemName = orderItem.getItem().getName();
+     orderPrice = orderItem.getOrderPrice();
+     count = orderItem.getCount();
+ }
+}
+
+```
+
+→ 지연로딩 처리로 
+order 1번 
+
+member address → N번
+
+orderItem → N번
+
+item → N번 
+
+호출하게 됨
+
+### V3- 엔티티를  DTO로 변환 -페치 조인 최적화
+
+```java
+@GetMapping("/api/v3/orders")
+public List<OrderDto> ordersV3() {
+    List<Order> orders = orderRepository.findAllWithItem();
+    List<OrderDto> result = orders.stream()
+          .map(o -> new OrderDto(o))
+          .collect(toList());
+
+   return result;
+}
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+public List<Order> findAllWithItem() { 
+    return em.createQuery(
+         "select distinct o from Order o" + 
+                 " join fetch o.member m" +
+                 " join fetch o.delivery d" +
+                 " join fetch o.orderItems oi" +
+                 " join fetch oi.item i", Order.class)
+             .getResultList();
+}
+
+```
+
+→ 페치 조인으로 SQL이 1번만 실행됨
+
+→ distinct를 사용한 이유는 1대다 조인이 있으므로 데이터 베이스 row 증가
+
+→ order 엔티티의 조회수도 증가한다.
+
+→ jpa의 distinct 는 sql에 distinct를 추가하고, 더해서 같은 엔티티가 조회되면, 애플리케이션에서 중복을 걸러준다.
+
+**→ 단점 : 페이징 불가능(1대 다 관계에서 페이징 처리를 하기 애매함..)**
+
+***(컬렉션 페치조인에서 페이징 해버리면  db에서 전체 데이터를 읽어오고, 메모리에서 페이징 해버린다.***
+
+### V3.1- 엔티티를  DTO로 변환 -페이징과 한계 돌파
+
+```java
+@GetMapping("/api/v3.1/orders")
+public List<OrderDto> ordersV3_page(@RequestParam(value ="offset",
+defaultValue = "0") int offset, @ReqeustParam(value = "limit, defaultValue ="100") int limit){
+
+     List<Order> orders = orderRepository.findAllWithMemberDelivery(offset, limit);
+     List<OrderDto> result = orders.stream()
+               .map(o -> new OrderDto(o))
+               .collect(toList());
+
+     return result;
+}
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+public List<Order> findAllWithMemberDelivery(int offset, int limit){
+  return em.createQuery(
+         "select o from Order o"+
+              " join fetch o.member m" + 
+              " join fetch o.delivery d", Order.class)
+          .setFirstResult(offset)
+          .setMaxResult(limit)
+          .getResultList();
+}
+```
+
+```java
+spring:
+ jpa:
+ properties:
+ hibernate:
+ default_batch_fetch_size: 1000
+```
+
+→ 최적화 옵션  in 조건절로 묶어서 한번에 실행하게 처리해 준다.
+
+- 쿼리 호출 수가 1 + 1
+- XtoOne 은 페치조인으로 처리(페이징 영향 없음)
+- toMany 는 default_batch_fetch_size 옵션을 통해서 지연 로딩 처리(in 조건 사용)
+
+실행 쿼리
+
+```sql
+select
+        * 
+    from
+        ( select
+            order0_.order_id as order_id1_6_0_,
+            member1_.member_id as member_id1_4_1_,
+            delivery2_.delivery_id as delivery_id1_2_2_,
+            order0_.delivery_id as delivery_id4_6_0_,
+            order0_.member_id as member_id5_6_0_,
+            order0_.order_date as order_date2_6_0_,
+            order0_.status as status3_6_0_,
+            member1_.city as city2_4_1_,
+            member1_.street as street3_4_1_,
+            member1_.zipcode as zipcode4_4_1_,
+            member1_.name as name5_4_1_,
+            delivery2_.city as city2_2_2_,
+            delivery2_.street as street3_2_2_,
+            delivery2_.zipcode as zipcode4_2_2_,
+            delivery2_.status as status5_2_2_ 
+        from
+            orders order0_ 
+        inner join
+            member member1_ 
+                on order0_.member_id=member1_.member_id 
+        inner join
+            delivery delivery2_ 
+                on order0_.delivery_id=delivery2_.delivery_id ) 
+    where
+        rownum <= ?
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+select
+        orderitems0_.order_id as order_id5_5_1_,
+        orderitems0_.order_item_id as order_item_id1_5_1_,
+        orderitems0_.order_item_id as order_item_id1_5_0_,
+        orderitems0_.count as count2_5_0_,
+        orderitems0_.item_id as item_id4_5_0_,
+        orderitems0_.order_id as order_id5_5_0_,
+        orderitems0_.order_price as order_price3_5_0_ 
+    from
+        order_item orderitems0_ 
+    where
+        orderitems0_.order_id in (
+            ?, ?
+        )
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+select
+        item0_.item_id as item_id2_3_0_,
+        item0_.name as name3_3_0_,
+        item0_.price as price4_3_0_,
+        item0_.stock_quantity as stock_quantity5_3_0_,
+        item0_.artist as artist6_3_0_,
+        item0_.etc as etc7_3_0_,
+        item0_.author as author8_3_0_,
+        item0_.isbn as isbn9_3_0_,
+        item0_.actor as actor10_3_0_,
+        item0_.director as director11_3_0_,
+        item0_.dtype as dtype1_3_0_ 
+    from
+        item item0_ 
+    where
+        item0_.item_id in (
+            ?, ?, ?, ?
+        )
+```
+
+→ 총 쿼리 3번 호출하면서 페이징에 대한 부분도 문제 없이 처리 가능한다.
+
+### V4- JPA에서 DTO 직접조회
+
+```java
+@GetMapping("/api/v4/orders")
+public List<OrderQueryDto> ordersV4() { 
+     return orderQueryRepository.findOrderQueryDtos();
+}
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+public List<OrderQueryDto> findOrderQueryDtos(){
+    List<OrderQueryDto> result = findOrders();
+
+    result.forEach(o -> {
+        List<OrderItemQueryDto> orderItems= findOrderItems(o.getOrderId());
+        o.setOrderItems(orderItems);
+    });
+    
+    return result;
+}   
+
+private List<OrderQueryDto> findOrders() { 
+     return em.createQuery(
+          "select new jpabook.jpashop.repository.order.query.OrderQueryDto(o.id, m.name, o.orderDate,o.status, d.address)" +
+          + " from Order o" +
+          "join o.member m" +
+          "join o.delivery d", OrderQueryDTO.class)
+     .getResultList();
+}
+
+private List<OrderItemQueryDto> findOrderItems(Long orderId) {
+ return em.createQuery(
+ "select new jpabook.jpashop.repository.order.query.OrderItemQueryDto(oi.order.id, i.name, oi.orderPrice, oi.count)" +
+   " from OrderItem oi" +
+   " join oi.item i" +
+   " where oi.order.id = : orderId",
+OrderItemQueryDto.class)
+ .setParameter("orderId", orderId)
+ .getResultList();
+ }
+```
+
+```java
+@Data
+@EqualsAndHashCode(of = "orderId")
+public class OrderQueryDto {
+      private Long orderId;
+      private String name;
+      private LocalDateTime orderDate; //주문시간
+      private OrderStatus orderStatus;
+      private Address address;
+      private List<OrderItemQueryDto> orderItems;
+  
+
+    public OrderQueryDto(Long orderId, String name, LocalDateTime orderDate,
+          OrderStatus orderStatus, Address address) {
+ 
+      this.orderId = orderId;
+      this.name = name;
+      this.orderDate = orderDate;
+      this.orderStatus = orderStatus;
+      this.address = address;
+ }
+}
+```
+
+```java
+@Data
+public class OrderItemQueryDto {
+ 
+     @JsonIgnore
+     private Long orderId; //주문번호
+     private String itemName;//상품 명     
+     private int orderPrice; //주문 가격
+     private int count; //주문 수량
+ 
+ public OrderItemQueryDto(Long orderId, String itemName, int orderPrice, int count) {
+      this.orderId = orderId;
+      this.itemName = itemName;
+      this.orderPrice = orderPrice;
+      this.count = count;
+ }
+}
+```
+
+→ ORDER MEMBER DELIVERY 조인해서 조회
+
+→ ORDERITEM ITEM 조인해서 조회
+
+→ ORDER MEMBER DELIVERY 은 X to One 관계임으로 페이징 처리 가능
+
+→ 그 이후에 orderItem과 item을 조인해서 데이터를 가져온다.
+
+- **@batchSize 가 적용은 안되는 듯 하다.. (엔티티 지연로딩에만 사용 가능)**
+
+### V5- JPA에서 DTO 직접조회 - 컬렉션 조회 최적화
+
+```java
+@GetMapping("/api/v5/orders")
+public List<OrderQueryDto> orderV5() { 
+     return orderQueryRepository.findAllByDto_optimization();
+}
+
+public List<OrderQueryDto> findAllByDto_optimization(){
+   
+     List<OrderQueryDto> result = findOrders();
+ 
+     Map<Long, List<OrderItemQueryDto>> orderItemMap = findOrderItemMap(toOrderIds(result));
+
+     result.forEach(o -> o.setOrderItem(orderItemMap.get(o.getOrderId())));
+  
+     return result;
+}
+
+private List<Long> toOrderIds(List<OrderQueryDto> result) {
+     return result.stream()
+           .map(o -> o.getOrderIds();
+           .collect(Collectors.toList());
+}
+
+private Map<Long, List<OrderItemQueryDto>> findOrderItemMap(List<Long>
+orderIds) {
+ List<OrderItemQueryDto> orderItems = em.createQuery(
+      "select new jpabook.jpashop.repository.order.query.OrderItemQueryDto(oi.order.id, i.name,  oi.orderPrice, oi.count)" +
+      " from OrderItem oi" +
+      " join oi.item i" +
+      " where oi.order.id in :orderIds", OrderItemQueryDto.class)
+    .setParameter("orderIds", orderIds)
+    .getResultList();
+    return orderItems.stream()
+      .collect(Collectors.groupingBy(OrderItemQueryDto::getOrderId));
+}
+
+```
+
+→ toOne 관계들을 먼저 조회하고 여기서 얻은 orderId로 toMany 관계들을 in조건으로 한번에 조회
+
+→ 성능 최적화 가능(쿼리 2번 실행..)
+
+### API 개발 고급 정리정리
+
+1. 엔티티 조회 방식으로 우선 접근
+- 페치조인으로 쿼리 수를 최적화
+- 컬렉션 최적화
+
+      1) 페이징 필요 시 toOne 은 fetch 조인, toMany는 @BatchSize로 지연로딩
+
+      2) 페이징 필요 없을 시, 전체 페치 조인 사용
+
+1. 엔티티 조회 방식으로 안되면 dto 조회 방식 사용 - 컬렉션 최적화로 toOne , to Many 각자 join 쿼리 수행
+
+1. 그래도 안되면 native 쿼리
