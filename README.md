@@ -34,6 +34,239 @@ JPA_README 정리
 
   `⭐` 엔티티를 설계할 때 주의 할 점
 
+
+
+
+## JPA API 개발 시 성능 최적화 방식
+
+### 회원생성
+
+### V1
+
+```java
+@Data
+static class CreateMemberRequest {
+    private String name;
+}
+
+@Data
+static class CreateMemberResponse {
+    private Long id;
+
+    public CreateMemberResponse(Long id) {
+       this.id = id;
+    }
+}
+
+@PostMapping("/api/v1/members")
+public CreateMemberReponse saveMemberV1(@RequestBody @Valid Member member
+{
+     Long id = memberService.join(member);
+     return new CreateMemberResponse(id);
+}
+
+```
+
+→ v1 : 엔티리를 Request Body에 직접 매핑
+
+- 엔티티에 API 검증을 위한 로직이 들어간다(@NotEmpty)
+- 한 엔티티에 각각의 api를 위한 모든 요구사항을 담기가 어려움
+- 엔티티가 변경되면 api 스펙이 변한다.
+
+### V2
+
+```java
+@PostMapping("/api/v2/members")
+ public CreateMemberResponse saveMemberV2(@RequestBody @Valid CreateMemberRequest request) 
+ { 
+      Member member = new Member();
+      member.setName(request.getName());
+      
+      Long id = memberService.join(member);
+      
+      return new CreateMemberResponse(id);
+ }
+```
+
+→ v2: 엔티티 대신에 CreateMemberRequest 를 만들어서 매핑
+
+- 엔티티와 프레젠테이션 계층을 위한 로직 분리 가능
+- 엔티티와 api 스펙을 명확하게 분리할 수 있다.
+- 엔티티가 변해도 API 스펙이 변하지 않는다.
+
+### 회원수정
+
+```java
+@PutMapping("/api/v2/members/{id}")
+public UpdateMemberResponse updateMemberV2(@PathVariable("id") Long id, @RequestBody @Valid UpdateMemberRequest request) {
+      memberService.update(id, request.getName());
+      Member findMember = memberService.findOne(id);
+      return new UpdateMemberResponse(findMember.getId(), findMember.getName());
+}
+ 
+@Data
+static class UpdateMemberRequest {
+      private String name;
+}
+ 
+@Data
+@AllArgsConstructor
+static class UpdateMemberResponse {
+      private Long id;
+      private String name;
+}
+
+----------------------------------------------------------------
+
+@Transactional
+public void update(Long id, String name){
+     Member member = memberRepository.findOne(id);
+     member.setName(name);
+     }
+}
+```
+
+→ DTO에 요청 파라미터를 담아서 처리한다.
+
+→ 변경 감지를 통해 진행한다.
+
+### 회원조회 API
+
+### V1
+
+```java
+@GetMapping("/api/v1/members")
+public List<Member> membersV1() {
+     return memberService.findMembers();
+}
+
+```
+
+→ 응답 값으로 엔티티를 외부에 노출함
+
+→ 기본적으로 엔티티의 모든값이 노출됨
+
+→ 여러 api에서 스펙을 엔티티에 맞추기가 어려움
+
+→ 엔티티가 변경되면 api 스펙이 변한다.
+
+### V2
+
+```java
+@GetMapping("/api/v2/members")
+public Result membersV2(){
+     List<Member> findMembers = memberService.findMembers();
+
+     List<MemberDto> collect = findMembers.stream()
+             .map(m -> new MemberDto(m.getName())))
+             .collect(Collectors.toList());
+
+     return new Result(collect);
+}
+
+@Data
+@AllArgsConstructor
+static class Result<T> {
+    private T data;
+}
+
+@Data
+@AllArgsConstructor
+static class MemberDto {
+    private String name;
+}
+```
+
+→ 엔티티를 DTO로 변환해서 반환한다.
+
+→ 엔티티가 변해도 API 스펙이 변경되지 않는다.
+
+→ 추가로 Result 클래스로 컬렉션을 감싸서 향후 필요한 필드 추가가능
+
+### 회원조회 API-고급
+
+회원
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/88f3800e-4586-4d52-8d7f-f80bb1853ba0/Untitled.png)
+
+주문
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/dfcce510-112b-4bce-92ed-ea337f2ee2ef/Untitled.png)
+
+주문 - 아이템
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/5b26101c-854c-4c37-a1f3-5da9581894ac/Untitled.png)
+
+배송
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/b60c109a-8563-413a-94f5-19b90c89ac7e/Untitled.png)
+
+아이템
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/6fbb0e8f-1ad0-47c9-814b-fbc4c5ce00fa/Untitled.png)
+
+### V1 - 엔티티를 직접 노출
+
+```java
+@GetMapping("/api/v2/simple-orders")
+public List<Order> ordersV1(){
+     List<Order> all = orderRepository.findAllByString(new OrderSearch()){
+     for(Order order : all{
+         order.getMember().getName();
+         order.getDelivery().getAddress();
+     }
+     return all;
+}
+```
+
+→ 엔티티를 직접 노출하는 것은 좋지 않음
+
+→ 지연로딩 처리를 통해서 데이터 전체를 가져오게 처리
+
+→ json은 proxy객체를 어떻게 사용하는 지 몰라서 Hibernate5Module 사용해야함
+
+(proxy를 보여주는 기능, 지연로딩 처리한거 까지 json으로 보여주는 기능 존재)
+
+→ @JsonIgnore 한쪽은 처리해야함(양방향에서 문제 발생)
+
+### V2 - 엔티티를 DTO로 변환
+
+```java
+@GetMapping("/api/v2/simple-orders")
+public List<SimpleOrderDto> ordersV2(){
+     List<Order> orders = orderRepository.findAll();
+     List<SimpleOrderDto> result = orders.stream()
+           .map(o -> new SimpleOrderDto(o))
+           .collect(toList());
+   
+     return result;
+}
+
+@Data
+static class SimpleOrderDto{
+   
+     private Long orderId;
+     private String name;
+     private LocalDateTime orderDate;
+     private OrderStatus orderStatus;
+     private Address address;
+
+  public SimpleOrderDto(Order order){
+     orderId = order.getId();
+     name = order.getMember().getName();
+     orderDate = order.getOrderDate();
+     orderStatus - order.getStatus();
+     address = order.getDelivery().getAddress();
+  }
+}
+
+```
+
+→ 엔티티를 DTO로 변환하는 일반적인 방법
+
+→ 쿼리가 **주문 1번, 주문 횟수만큼 회원 조회, 주문횟수 만틈 배송 조회**
+
+→ EX) 주문이 각자 다른 5명의 고객이면 쿼리가 1 + 5 + 5 총 11번 실행된다.
 - one to many 단계에서는 many 가 연관관계의 **주인**
 - one to one 또는 many to many 에서는 외래키가 존재하는 부분이 **주인**
 
