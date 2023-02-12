@@ -1012,24 +1012,24 @@ static class MemberDto {
 ### 회원조회 API-고급
 
 회원
+![image](https://user-images.githubusercontent.com/56577599/218297855-59a5fa85-a895-4459-8a76-dd5b0e455fb3.png)
 
-![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/88f3800e-4586-4d52-8d7f-f80bb1853ba0/Untitled.png)
 
 주문
+![image](https://user-images.githubusercontent.com/56577599/218297836-a99286ce-342e-4605-9f74-8136bed3d696.png)
 
-![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/dfcce510-112b-4bce-92ed-ea337f2ee2ef/Untitled.png)
 
 주문 - 아이템
+![image](https://user-images.githubusercontent.com/56577599/218297816-870ba105-8542-4fe7-9848-d306df8d39b9.png)
 
-![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/5b26101c-854c-4c37-a1f3-5da9581894ac/Untitled.png)
 
 배송
+![image](https://user-images.githubusercontent.com/56577599/218297871-8141a730-5dbf-491e-a5ac-dcfb6879c04a.png)
 
-![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/b60c109a-8563-413a-94f5-19b90c89ac7e/Untitled.png)
 
 아이템
+![image](https://user-images.githubusercontent.com/56577599/218297797-c888e1bc-b39a-448a-a030-2d5f3ce13e54.png)
 
-![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/6fbb0e8f-1ad0-47c9-814b-fbc4c5ce00fa/Untitled.png)
 
 ### V1 - 엔티티를 직접 노출
 
