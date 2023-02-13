@@ -1577,3 +1577,304 @@ orderIds) {
 - 실시간 서비스에서는 OSLV = FALSE,
 - ADMIN 처럼 커넥션을 많이 사용하지 않는 곳에서는 OSLV = TRUE
 - OrderService(핵심 비즈니스 로직) OrderQueryService(화면이나 API 에 맞춘 서비스, 주로 읽기 전용 트랜잭션 사용)
+
+
+
+## JPA API 개발 시 성능 최적화 방식
+
+**예제 데이터**
+
+![image](https://user-images.githubusercontent.com/56577599/218491586-ab4876b1-aa35-4d72-88fb-596626da4f70.png)
+
+
+```java
+@Entity
+@Getter @Setter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@ToString(of = {"id", "username", "age"})
+public class Member{
+
+     @Id
+     @GeneratedValue
+     @Column(name = "member_id")
+     private Long id;
+     private String username
+     private int age;
+
+     @ManyToOne(fetch = FetchType.LAZY)
+     @JoinColumn(name = "team_id")
+     private Team team;
+
+     public Member(String username, int age) {
+           this(username, age, null);
+     }
+
+     public Member(String username, int age, Team team) {
+           this.username = username;
+           this.age = age;
+ 
+     if (team != null) {
+           changeTeam(team);
+           }
+      }
+
+      public void changeTeam(Team team) {
+           this.team = team;
+           team.getMembers().add(this);
+      }
+}
+
+```
+
+```java
+     @Entity
+     @Getter @Setter
+     @NoArgsConstructor(access = AccessLevel.PROTECTED)     
+     @ToString(of = {"id", "name"})
+     public class Team {
+ 
+     @Id @GeneratedValue
+     @Column(name = "team_id")
+     private Long id;
+ 
+     private String name;
+ 
+     @OneToMany(mappedBy = "team")
+     List<Member> members = new ArrayList<>();
+ 
+     public Team(String name) {
+           this.name = name;
+     }
+}
+```
+
+→ entity 는 생성자 필요(매개변수 없는)
+
+→ one to many, many to one 관계 처리(many 가 주인(외래키)
+
+→ xToOne은 기본이 즉시 로딩이여서 지연로딩으로 처리
+
+![image](https://user-images.githubusercontent.com/56577599/218491651-404cdaa5-efb9-44e1-b306-e2360cd7e1d5.png)
+
+
+## JPA VS JPA DATA
+
+### 회원
+
+**순수 JPA**
+
+```java
+@Repository
+public class MemberJpaRepository { 
+     
+     @PersistenceContext
+     private EntityManager em;
+
+     public Member save(Member member) {
+          em.persist(member);
+          return member;
+     }
+
+     public void delete(Member member) {
+          em.remove(member);
+     }
+
+     public List<Member> findAll() {
+          return em.createQuery("select m from Member m", Member.class)
+                   .getResultList();
+     }
+
+     public Optional<Member> findById(Long id) {
+          Member member = em.find(Member.class, id);
+          return Optional.ofNullable(member);
+     }
+
+     public Member find(Long id){
+          return em.find(Member.class, id);
+     }
+}
+```
+
+**JPA DATA**
+
+```java
+public interface MemberRepository extends JpaRepository<Member, Long> {
+}
+```
+
+→ 순수 jpa에서 직접 만든 모든 메소드 정의되어 있고 사용 할 수 있음
+
+### 팀
+
+**순수 JPA**
+
+```java
+@Repository
+public class TeamJpaRepository {
+
+     @PersistenceContext
+     private EntityManager em;
+     
+     public Team save(Team team) {
+         em.persist(team);
+         return team;
+     }
+
+      public void delete(Team team) {
+         em.remove(team);
+     }
+
+      public List<Team> findAll() {
+         return em.createQuery("select t from Team t”, Team.class)
+             .getResultList();
+     }
+
+     public Optional<Team> findById(Long id) {
+         Team team = em.find(Team.class, id);
+         return Optional.ofNullable(team);
+     }
+
+     public long count() {
+         return em.createQuery("select count(t) from Team t”, Long.class)
+         .getSingleResult();
+     }
+```
+
+**JPA DATA**
+
+```java
+public interface TeamRepository extends JpaRepository<Team, Long> {
+}
+```
+
+→ 순수 jpa에서 직접 만든 모든 메소드 정의되어 있고 사용 할 수 있음
+
+## 공통인터페이스 분석
+
+![image](https://user-images.githubusercontent.com/56577599/218491732-b74bebe3-092d-4e3d-b710-b724b0a552e0.png)
+
+
+## 쿼리 메소드 기능
+
+- 메소드 이름으로 쿼리 생성
+- NamedQuery
+- @Query - 리파지토리 메소드에 쿼리 정의
+- 파라미터 바인딩
+- 반환 타입
+- 페이징과 정렬
+- 벌크성 수정 쿼리
+- @EntityGraph
+
+### 메소드 이름으로 쿼리 생성
+
+**순수 JPA 리포지토리**
+
+```java
+ 
+   public List<Member> findByUsernameAndAgeGreaterThan(String username, int age) {
+
+     return em.createQuery("select m from Member m where m.username = :username and m.age > :age")
+              .setParameter("username", username)
+              .setParameter("age", age)
+              .getResultList();
+     }
+```
+
+**스프링 데이터 JPA**
+
+```java
+public interface MemberRepository extends JpaRepository<Member, Long> {
+
+     List<Member> findByUsernameAndAgeGreaterThan(String username, int age);
+
+}
+```
+
+→ findBy
+
+→ Read by 
+
+→ query by
+
+→ get by
+
+→ count
+
+→ exists
+
+→ 삭제 등등..
+
+### NamedQuery
+
+```java
+@Entity
+@NameQuery(
+     name = "Member.findByUsername",
+     query = "select m from Member m where m.username = :username")
+public class Member{
+...
+   }
+
+```
+
+**순수 JPA 리포지토리**
+
+```java
+public List<Member> findByUsername(String username) {
+
+    List<Member> resultLlist = 
+          em.createNamedQuery("Member.findByUsername", Member.class)
+            .setParameter("username", username)
+            .getResultList();
+    }
+}
+```
+
+**스프링 데이터 JPA**
+
+```java
+@Query(name ="Member.findByUsername")
+List<Member> findByUsername(@Param("username") String username);
+
+또는
+
+List<Member> findByUsername(@Param("username") String username);
+```
+
+→ @Query 생략 가능
+
+### @Query - 리파지토리 메소드에 쿼리 정의
+
+```java
+public interface MemberRepository extends JpaRepository<Member, Long> {
+
+@Query("select m from Member m where m.username = :username and m.age = :age")
+
+     List<Member> findUser(@Param("username") String username, @Param("age") int age);
+
+}
+
+@Query("select new study.datajpa.dto.MemberDto(m.id, m.username, t.name) " +
+        "from Member m join m.team t")
+List<MemberDto> findMemberDto();
+```
+
+```java
+@Data
+ public class MemberDto {
+ 
+      private Long id;
+      private String username;
+      private String teamName;
+ 
+     public MemberDto(Long id, String username, String teamName) {
+       this.id = id;
+       this.username = username;
+       this.teamName = teamName;
+ }
+}
+```
+
+→ @Query 매핑을 직접 메소드에 넣어서 사용 가능
+
+→ DTO 직접 조회도 가능
