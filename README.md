@@ -1543,4 +1543,37 @@ orderIds) {
 
 1. 엔티티 조회 방식으로 안되면 dto 조회 방식 사용 - 컬렉션 최적화로 toOne , to Many 각자 join 쿼리 수행
 
-1. 그래도 안되면 native 쿼리
+2. 그래도 안되면 native 쿼리
+
+
+### API 개발 고급 - 실무 필수 최적화
+
+### OSLV와 성능 최적화
+
+→ Open Session in View 
+
+![image](https://user-images.githubusercontent.com/56577599/218465511-f764008f-0c54-4324-b1d9-791f68a523eb.png)
+
+
+→ 트랜잭션 범위 밖에서도 영속성 컨테스트가 생존
+
+→ 즉 지연 로딩을 controller나 view 등 트랜잭션 밖에서도 사용 가능하다.
+
+→ spring.jpa.open-in-view : true 기본값
+
+**단점 : db connection을 반환하지 않는 다는 이야기 이기 때문에 실제로 db가 필요 없는 경우에서도 connection 관리가 안될 수 있다.**
+
+![image](https://user-images.githubusercontent.com/56577599/218465625-303009fa-12b8-451b-8f43-4bf650a13c01.png)
+
+
+→ 트랜잭션 범위 밖에서는 영속성 컨테스트를 사용 
+
+**→ 지연 로딩을 트랜잭션 안에서만 사용해야함**
+
+→ spring.jpa.open-in-view : false 기본값
+
+특징 : 영속성 컨테스트가 트랜잭션 안에서만 처리됨으로 지연 로딩 등의 처리를 하는 경우에는 트랜잭션 안에서 처리해야함
+
+- 실시간 서비스에서는 OSLV = FALSE,
+- ADMIN 처럼 커넥션을 많이 사용하지 않는 곳에서는 OSLV = TRUE
+- OrderService(핵심 비즈니스 로직) OrderQueryService(화면이나 API 에 맞춘 서비스, 주로 읽기 전용 트랜잭션 사용)
