@@ -1878,3 +1878,216 @@ List<MemberDto> findMemberDto();
 → @Query 매핑을 직접 메소드에 넣어서 사용 가능
 
 → DTO 직접 조회도 가능
+
+### 반환 타입
+
+- 스프링 데이터 JPA는 유연한 반환 타입 지원
+
+```java
+List<Member> findByUsername(String name); //컬렉션
+Member findByUsername(String name); //단건
+Optional<Member> findByUsername(String name); // 단건 Optional 
+```
+
+→ 컬렉션 ⇒ 결과 없음 : 빈 컬렉션 반환
+
+→ 단건
+
+1) 결과 없음 : null 반환
+
+2) 결과가 2건 이상 : javax.persistence.NonUniqueResultException 예외 발생
+
+### 순수 JPA 페이징과 정렬
+
+**순수 JPA**
+
+```java
+public List<Member> findByPage(int age, int offset, int limit) { 
+     return em.createQuery("select m from Member m where m.age = :age order by m.username desc")
+              .setParameter("age",age)
+              .setFirstResult(offset)
+              .setMaxResult(limit)
+              .getResultList();
+}
+
+public long totalCount(int age) {
+     return em.createQuery("select count(m) from Member m where m.age = :age", Long.class)
+              .setParameter("age", age)
+              .getSingleResult();
+}
+```
+
+ 
+
+**스프링 데이터 JPA**
+
+```java
+Page<Member> findByUsername(String name, Pageable pageable); //count 쿼리 사용
+
+Slict<Member> findByUsername(String name, Pageable pageable); // count 쿼리 미사용
+
+List<Member> findByUsername(String name, Pageable pageable); // count 쿼리 미사용
+
+List<Member> findByUsername(String name, Sort sort);
+
+Page<Member> findByAge(int age, Pageable pageable);
+```
+
+```java
+@Test
+public void page() throws Exception {
+ //given
+     memberRepository.save(new Member("member1", 10));
+     memberRepository.save(new Member("member2", 10));
+     memberRepository.save(new Member("member3", 10));
+     memberRepository.save(new Member("member4", 10));
+     memberRepository.save(new Member("member5", 10));
+ 
+ //when
+     PageRequest pageRequest = PageRequest.of(0, 3, Sort.by(Sort.Direction.DESC,
+     "username"));
+ 
+     Page<Member> page = memberRepository.findByAge(10, pageRequest);
+ 
+ //then
+     List<Member> content = page.getContent(); //조회된 데이터
+     assertThat(content.size()).isEqualTo(3); //조회된 데이터 수
+     assertThat(page.getTotalElements()).isEqualTo(5); //전체 데이터 수
+     assertThat(page.getNumber()).isEqualTo(0); //페이지 번호
+     assertThat(page.getTotalPages()).isEqualTo(2); //전체 페이지 번호
+     assertThat(page.isFirst()).isTrue(); //첫번째 항목인가?
+     assertThat(page.hasNext()).isTrue(); //다음 페이지가 있는가?
+}
+```
+
+**참고: count 쿼리를 다음과 같이 분리할 수 있음**
+
+```java
+@Query(value ="select m from Member m",
+       countQuery ="select count(m.username) from Member m")
+Page<Member> findMemberAllCountBy(Pageable pageable);
+```
+
+**페이지를 유지하면서 엔티티를 DTO로 변환하기**
+
+```java
+Page<Member> page = memberRepository.findByAge(10, pageRequest);
+Page<MemberDto> dtoPage = page.map(m -> new MemberDto());
+```
+
+### JPA를 사용한 벌크성 수정 쿼리 테스트
+
+**순수 JPA**
+
+```java
+public int bulkAgePlus(int age) {
+   int resultCount = em.createQuery(
+           "update Member m set m.age = m.age + 1" +
+                   "where m.age >= :age")
+           .setParameter("age",age)
+           .executeUpdate()'
+   return resultCount;
+}
+```
+
+**스프링 데이터 JPA**
+
+```java
+@Modifying
+@Query("update Member m set m.age = m.age + 1 where m.age >= :age")
+int bulkAgePlus(@Param("age") int age);
+```
+
+### @EntityGraph
+
+→ 연관된 엔티티들을 SQL 한번에 조회하는 방법
+
+```java
+@Test
+public void findMemberLazy() throws Exception {
+     //given
+     //member1 -> teamA
+     //member2 -> teamB
+     Team teamA = new Team("teamA");
+     Team teamB = new Team("teamB");
+ 
+     teamRepository.save(teamA);
+     teamRepository.save(teamB);
+ 
+     memberRepository.save(new Member("member1", 10, teamA));
+     memberRepository.save(new Member("member2", 20, teamB));
+     em.flush();
+     em.clear();
+     
+    //when
+     List<Member> members = memberRepository.findAll();
+ 
+    //then
+     for (Member member : members) {
+         member.getTeam().getName();
+     }
+}
+```
+
+- member → team은 지연 로딩이 세팅되어 있기 때문에 N+1 쿼리 문제가 발생한다.
+
+**JPQL 페치 조인**
+
+```java
+@Query("select m from Member m left join fetch m.team")
+List<Member> findMemberFetchJoin();
+```
+
+**EntityGraph**
+
+```java
+@Override
+@EntityGraph(attributePaths = {"team"})
+List<Member> findAll();
+
+//JPQL +  엔티티 그래프
+@EntityGraph(attributePaths = {"team"})
+@Query("select m from Member m")
+List<Mmeber> findMemberEntityGraph();
+
+@EntityGraph(attributePaths = {"team"})
+List<Member> findByUsername(String username)
+
+```
+
+- 사실상 페치 조인(Fetch join)의 간편 버전
+- leff outer join 사용
+
+**NamedEntityGraph**
+
+```java
+@NamedEntityGraph(name = "Member.all", attributeNodes =
+@NamedAttributeNode("team"))
+@Entity
+public class Member {}
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+@EntityGraph("Member.all")
+@Query("select m from Member m")
+List<Member> findMemberEntityGraph();
+```
+
+### JPA Hint & Lock
+
+```java
+@QueryHints(value = @QueryHint(name = "org.hibernate.readOnly", value =
+"true"))
+Member findReadOnlyByUsername(String username);
+```
+
+→ readOnly Hint 로 적용
+
+```java
+@QueryHints(value = { @QueryHint(name = "org.hibernate.readOnly",
+ value = "true")},
+ forCounting = true)
+Page<Member> findByUsername(String name, Pageable pageable);
+```
+
+→ count 쿼리에서 hint 적용
