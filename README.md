@@ -2091,3 +2091,143 @@ Page<Member> findByUsername(String name, Pageable pageable);
 ```
 
 → count 쿼리에서 hint 적용
+
+
+### 확장 기능
+
+사용자 정의 리포지토리 구현
+
+```java
+public interface MemberRepositoryCustom {
+     List<Member> findMemberCustom();
+}
+```
+
+→ 커스텀 인터페이스
+
+```java
+@RequiredArgsConstructor
+public class MemberRepositoryImpl implements MemberRepositoryCustom {
+
+     private final EntityManager em;
+
+     @Override
+     public List<Member> findMemberCustom() {
+         return em.createQuery("select m from Member m")
+                 .getResultList();
+     }
+}
+```
+
+→ 커스텀 인터페이스 구현체
+
+```java
+public interface MemberRepository extends JpaRepository<Member, Long>, MemberRepositoryCustom{
+
+   }
+```
+
+→ JpaRepository 와 MemberRepositoryCustom 같이 상속 받음
+
+```java
+List<Member> result = memberRepository.findMemberCustom();
+```
+
+→ 기본 impl 을 가지고 사용 가능함(설정 변경으로 명명 규칙 변경도 가능)
+
+### Auditing
+
+→ 엔티티를 생성, 변경할 때 변경한 사람과 시간을 추적하고 싶으면?
+
+- 등록일
+- 수정일
+- 등록자
+- 수정자
+
+**순수 JPA 사용**
+
+```java
+@MappedSuperClass
+@Getter
+public class JpaBaseEntity {
+
+     @Column(updatable = false)
+     private LocalDateTime createdDate;
+     private LocalDateTime updatedDate;
+
+     @PrePersist
+     public void prePersist() {
+        LocalDateTime now = LocalDateTime.now();
+        createdDate = now;
+        updatedDate = now;
+     }
+ 
+     @PreUpdate
+     public void preUpdate() {
+        updatedDate = LocalDateTime.now();
+     }
+}
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+public class Member extends JpaBaseEntity{}
+
+```
+
+**스프링 데이터 JPA 사용**
+
+- @EnableJpaAuditing → 스프링 부트 설정 클래스에 적용해야함
+- @EntityListeners(AuditingEntityListener.class → 엔티티에 사용
+
+```java
+@EntityListeners(AuditingEntityListener.class)
+@MappedSuperclass
+public class BaseEntity {
+
+     @CreatedDate
+     @Column(updatable = false)
+     private LocalDateTime createdDate;
+
+     @LastModifiedDate
+     private LocalDateTime lasstModifiedDate;
+
+     @CreatedBy
+     @Column(updatable = false)
+     private String createdBy;
+
+     @LastModifiedBy
+     private String lastModifiedBy;
+}
+```
+
+```java
+@Bean
+public AuditorAware<String> auditorProvider() {
+     return () -> Optional.of(UUID.randomUUID().toString());
+}
+```
+
+→ 실무에서는 세션 정보나, 스프링 시큐리티 로그인 정보에서 ID를 받음
+
+```java
+public class BaseTimeEntity {
+ 
+     @CreatedDate
+     @Column(updatable = false)
+     private LocalDateTime createdDate;
+ 
+     @LastModifiedDate
+     private LocalDateTime lastModifiedDate;
+    }
+
+public class BaseEntity extends BaseTimeEntity {
+     @CreatedBy
+     @Column(updatable = false)
+     private String createdBy;
+ 
+     @LastModifiedBy
+     private String lastModifiedBy;
+}
+```
+
+→ 시간만 쓸때는 BaseTimeEntity 만 사용 시간 사용자, 수정자 전부 사용 할때는 BaseEntity 사용
