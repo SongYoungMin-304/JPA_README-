@@ -2431,3 +2431,134 @@ public interface MemberRepository .... {
      List<UsernameOnly> findProjectionsByUsername(String username);
 
 ```
+
+
+# QueryDsl
+
+**→ 복잡한 쿼리를 객체적으로 작성할 수 있도록 지원하는 기능**
+
+**→ Q 파일을 만들어서 사용**
+
+```java
+@Autowired
+EntityManager em;
+
+Hello hello = new Hello();
+em.persist(hello);
+
+JPAQueryFactory query = new JPAQueryFactory(em);
+QHello qHello = QHello.hello;
+
+Hello result = query
+           .selectFrom(qHello)
+           .fetchOne();
+```
+
+**예제 데이터**
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/92b5eb23-623d-480f-b7a8-5be8c3eab099/Untitled.png)
+
+```java
+@Entity
+@Getter @Setter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@ToString(of = {"id", "username", "age"})
+public class Member{
+
+     @Id
+     @GeneratedValue
+     @Column(name = "member_id")
+     private Long id;
+     private String username
+     private int age;
+
+     @ManyToOne(fetch = FetchType.LAZY)
+     @JoinColumn(name = "team_id")
+     private Team team;
+
+     public Member(String username, int age) {
+           this(username, age, null);
+     }
+
+     public Member(String username, int age, Team team) {
+           this.username = username;
+           this.age = age;
+ 
+     if (team != null) {
+           changeTeam(team);
+           }
+      }
+
+      public void changeTeam(Team team) {
+           this.team = team;
+           team.getMembers().add(this);
+      }
+}
+
+```
+
+```java
+     @Entity
+     @Getter @Setter
+     @NoArgsConstructor(access = AccessLevel.PROTECTED)     
+     @ToString(of = {"id", "name"})
+     public class Team {
+ 
+     @Id @GeneratedValue
+     @Column(name = "team_id")
+     private Long id;
+ 
+     private String name;
+ 
+     @OneToMany(mappedBy = "team")
+     List<Member> members = new ArrayList<>();
+ 
+     public Team(String name) {
+           this.name = name;
+     }
+}
+```
+
+→ entity 는 생성자 필요(매개변수 없는)
+
+→ one to many, many to one 관계 처리(many 가 주인(외래키)
+
+→ xToOne은 기본이 즉시 로딩이여서 지연로딩으로 처리
+
+### Querydsl vs JPQL
+
+**jpql**
+
+```java
+@Test
+public void startJPQL(){
+
+      String qlString = 
+               "select m from Member m "+
+               "where m.username = :username";
+
+      Member findMember = em.createQuery(qlString, Member.class)
+                  .setParameter("username","member1")
+                  .getSingleResult();
+```
+
+**queryDsl**
+
+```java
+@Test
+public void startQuerydsl() {
+
+     JPAQueryFactory queryFactory = new JPAQueryFactory(em);
+     QMember m = new QMember("m");
+
+     Member findMember = queryFactory
+                .select(m)
+                .from(m)
+                .where(m.username.eq("member1"))
+                .fetchOne();   
+
+```
+
+**→ JPQL은 문자로 작성하는 것이기 때문에 실행 시점에 오류가 발생한다.**
+
+**→ QueryDsl 은 자바 소스 이기 때문에 컴파일 시점 오류가 발생**
