@@ -2231,3 +2231,203 @@ public class BaseEntity extends BaseTimeEntity {
 ```
 
 → 시간만 쓸때는 BaseTimeEntity 만 사용 시간 사용자, 수정자 전부 사용 할때는 BaseEntity 사용
+
+
+### Web 확장 -도메인 클래스 컨버터
+
+**도메인 클래스 컨버터 사용 전**
+
+```java
+@RestController
+@RequiredArgsConstructor
+public class MemberController {
+
+     private final MemberRepository memberRepository;
+
+     @GetMapping("/members/{id}")
+     public String findMember(@PathVariable("id") Long id) {
+          Member member = memberRepository.findById(id).get();
+          return member.getUsername();
+     }
+}
+```
+
+**도메인 클래스 컨버터 사용 후**
+
+```java
+@RestController
+@RequiredArgsConstructor
+public class MemberController {
+
+     private final MemberRepository memberRepository;
+
+     @GetMapping("/members/{id}")
+     public String findMember(@PathVariable("id") Member member) {
+          return member.getUsername();
+     }
+}
+```
+
+→ Http 요청은 회워 id를 받지만 도메인 클래스 컨버터가 중간에 동작해서 회원 엔티티 객체를 반환
+
+주의 : 도메인 클래스 컨버터로 엔티티를 파라미터로 받으면, 이 엔티티는 단순 조회용으로만 사용해야한다.
+
+(트랜잭션이 없는 범위에서 엔티티를 조회했으므로, 엔티티를 변경해도 DB에 반영 되지 않는다.)
+
+### Web 확장 - 페**이징과 정렬**
+
+- **스프링 데이터가 제공하는 페이징과 정렬 기능을 스프링 MVC에서 편리하게 사용 가능**
+
+```java
+@GetMapping("/members")
+public Page<Member> list(Pageable pageable) {
+
+     Page<Member> page = memberRepository.findAll(pageable);
+     return page;
+}
+```
+
+- 파라미터로 Pageable을 받을 수 있다.
+- Pageable 은 인터페이스, 실제는 PageRequest 객체 생성
+- **ex) /member?page=0&size=3&sort=id,desc&sort=username,desc**
+
+→ page: 현재 페이지, 0부터 시작한다.
+
+→ size : 한 페이지에 노출할 데이터 건수
+
+→ sort : 정렬조건을 정의한다.
+
+### Page 내용을 DTO로 변환하기
+
+→ map() 을 지원해서 내부 데이터를 다른 것으로 변경 할 수 있다.
+
+```java
+@Data
+public class MemberDto{
+
+     private Long id;
+     private String username;
+
+     public MemberDto(Member m){
+        this.id = m.getId();
+        this.username = m.getUsername();
+     }
+}
+```
+
+```java
+@GetMapping("/members")
+public Page<MemberDto> list(Pageable pageable){
+
+     Page<Memeber> page = memberRepository.findAll(pageable);
+     Page<MemberDto> pageDto = page.map(MemberDTO::new);
+     return pageDto;
+
+     // return memberRepository.findAll(pageable).map(MemberDto::new);
+}
+
+```
+
+### 스프링 데이터 JPA 분석
+
+→ 스프링 데이터 JPA가 제공하는 공통 인터페이스 구현체
+
+```java
+@Repository
+@Transactional(readOnly = true)
+public class SimpleJpaRepository<T, ID> ...{
+ 
+      @Transactional
+      public <S extends T> S save(S entity) {
+ 
+      if (entityInformation.isNew(entity)) {
+         em.persist(entity);
+         return entity;
+      } else {
+         return em.merge(entity);
+      }
+ }
+ ...
+}
+```
+
+@Transaction 트랜잭션 적용
+
+- JPA의 모든 변경은 트랜잭션 안에서 동작
+- 스프링 데이터 JPA는 변경 메서드를 트랜잭션 처리
+- 서비스 계층에서 트랜잭션을 시작하지 않으면 리파지토리에서 트랜잭션 시작
+- 서비스 계층에서 트랜잭션을 시작하면 리파지토리는 해당 트랜잭션을 전파 받아서 사용
+- 그래서 스프링 JPA를 사용할 때 트랜잭션이 없어도 데이터 등록, 변경 가능(사실은 트랜잭션이 리포지토리 계층에 걸려있응 것임)
+
+@Transactional(readOnly = true)
+
+- 데이터를 단순히 조회만 하고 변경하지 않는 트랜잭션에서 realOnly  = true 옵션을 사용하면 플러시를 생략해서 약간의 성능 향상 가능
+
+**** save() 메서드
+→ 새로운 엔티티면 저장(persist)**
+
+**→ 새로운 엔티티가 아니면 병햡(merge)**
+
+**새로운 엔티티를 판단하는 기본 전략**
+
+- **식별자가 객체일 때 null로 판단**
+- **식별자가 자바 기본 타입일 때 0으로 판단**
+- **Persistable 인터페이스를 구현해서 판단 로직 변경 가능**
+
+중요! 
+
+1) JPA 식별자 생성 전략이 @GenerateValue 면 save() 호출 시점에 식별자가 없으므로 save()를 호출한다.!
+
+2) JPA 식별자 생성 전략에 @Id만 사용해서 직접 할당하는 경우 이미 식별자가 있으므로 Merge(존재하는 지 확인 이후 생성)전략을 사용하게 됨으로 비효율적이다.
+
+**따라서 Persistable 을 사용해서 구분하는 것이 좋다.**
+
+```java
+public interface Persistable<ID> {
+    ID getId();
+    boolean isNew();
+}
+```
+
+```java
+@EntityListeners(AuditingEntityListener.class)
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Item implements Persistable<String> {
+ 
+ @Id
+ private String id;
+ 
+ @CreatedDate
+ private LocalDateTime createdDate;
+ public Item(String id) {
+      this.id = id;
+ }
+ 
+ @Override
+ public String getId() {
+      return id;
+ }
+
+ @Override
+ public boolean isNew() {
+       return createdDate == null;
+ }
+}
+
+```
+
+### Projections
+
+**엔티티 대신에 DTO를 편리하게 조회할 때 사용**
+
+```java
+public interface UsernameOnly {
+     String getUsername();
+}
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+public interface MemberRepository .... {
+     List<UsernameOnly> findProjectionsByUsername(String username);
+
+```
