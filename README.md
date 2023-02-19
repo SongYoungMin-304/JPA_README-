@@ -2562,3 +2562,94 @@ public void startQuerydsl() {
 **→ JPQL은 문자로 작성하는 것이기 때문에 실행 시점에 오류가 발생한다.**
 
 **→ QueryDsl 은 자바 소스 이기 때문에 컴파일 시점 오류가 발생**
+
+
+- **참고**
+
+**1. JPAQueryFactory를 필드로**
+
+```java
+@PersistenceContext
+EntityManager em;
+
+JPAQueryFactory queryFactory;
+
+@BeforeEach
+public void before() {
+      queryFactory = new JPAQueryFactory(em);
+}
+
+@Test
+public void startQuerydsl2() {
+
+     QMember m = new QMember("m");
+
+     Member findMember = queryFactory
+                .select(m)
+                .from(m)
+                .where(m.username.eq("member1"))
+                .fetchOne();
+}
+```
+
+**2. Q클래스 인스턴스를 사용하는 2가지 방법**
+
+```java
+QMember qMember = new QMember("m"); //별칭 직접 지정
+QMember qMember = QMember.member;  // 기본 인스턴스 사용
+```
+
+**3. 기본 인스턴스를 static import와 함께 사용**
+
+```java
+import static study.querydsl.entity.QMember.*;
+
+@Test
+public void startQuerydsl3(){
+
+     Member findMember = queryFactory
+               .select(member)
+               .from(member)
+               .where(member.username.eq("member1"))
+               .fetchOne();
+}
+```
+
+### 검색 조건 쿼리
+
+**기본 검색 쿼리**
+
+```java
+@Test
+public void search() {
+      Member findMember = queryFactory
+                  .selectFrom(member)
+                  .where(member.username.eq("member1")
+                       .and(member.age.eq(10)))
+                  .fetchOne();
+}
+```
+
+**JPQL이 제공하는 모든 검색 조건 제공**
+
+```java
+member.username.eq("member1") //username = 'member1'
+member.username.ne("member1") //username != 'member1'
+member.username.eq("member1").not() //username != 'member1'
+
+member.username.isNotNull() //이름이 is not null
+
+member.age.in(10,20) //age in(10,20)
+member.age.notIn(10,20) //age not in(10,20)
+member.age.between(10,30) //between 10, 30
+
+member.age.goe(30) // age >=30
+member.age.gt(30) // age > 30
+member.age.loe(30) // age <= 30
+member.age.lt(30) //age < 30
+
+member.username.like("member%") //like 검색
+member.username.contains("member") // like "%member%" 검색
+member.username.startsWith("member") // like "member%" 검색
+
+```
