@@ -2563,7 +2563,6 @@ public void startQuerydsl() {
 
 **→ QueryDsl 은 자바 소스 이기 때문에 컴파일 시점 오류가 발생**
 
-
 - **참고**
 
 **1. JPAQueryFactory를 필드로**
@@ -2617,7 +2616,7 @@ public void startQuerydsl3(){
 
 ### 검색 조건 쿼리
 
-**기본 검색 쿼리**
+**1)기본 검색 쿼리**
 
 ```java
 @Test
@@ -2630,7 +2629,28 @@ public void search() {
 }
 ```
 
-**JPQL이 제공하는 모든 검색 조건 제공**
+쿼리 실행 결과
+
+```sql
+ select
+        member1 
+    from
+        Member member1 
+    where
+        member1.username = ?1 
+        and member1.age = ?2 */ select
+            member0_.member_id as member_id1_1_,
+            member0_.age as age2_1_,
+            member0_.team_id as team_id4_1_,
+            member0_.username as username3_1_ 
+        from
+            member member0_ 
+        where
+            member0_.username=? 
+            and member0_.age=?
+```
+
+**2)JPQL이 제공하는 모든 검색 조건 제공**
 
 ```java
 member.username.eq("member1") //username = 'member1'
@@ -2653,3 +2673,357 @@ member.username.contains("member") // like "%member%" 검색
 member.username.startsWith("member") // like "member%" 검색
 
 ```
+
+**3)AND 조건을 파라미터로 처리**
+
+```java
+@Test
+public void serachAndParam() {
+    List<Member> result1 = queryFactory
+               .selectFrom(member)
+               .where(member.username.eq("member1"), member.age.eq(10))
+               .fetch();
+}
+```
+
+### **결과 조회**
+
+```java
+// List
+List<Member> fetch = queryFactory
+             .selectFrom(member)
+             .fetch();
+
+// 단 건
+Member findMember1 = queryFactory
+              .selectrFrom(member)
+              .fetchOne();
+
+// 처음 한 건 조회
+Member findMember2 = queryFactory
+            .selectFrom(member)
+            .fetchFirst();
+
+// 페이징에서 사용 (count 쿼리도 실행)
+QueryResults<Member> results = queryFactory
+            .selectFrom(member)
+            .fetchResults();
+
+result.getTotal();
+        List<Member> results = result.getResults();
+
+// count 쿼리로 변경
+long count = queryFactory
+            .selectFrom(member)
+            .fetchCount();  
+
+```
+
+페이징 메소드 실행 시 실행되는 쿼리
+
+```sql
+select
+        count(member1) 
+    from
+        Member member1 */ select
+            count(member0_.member_id) as col_0_0_ 
+        from
+            member member0_
+
+select
+        member1 
+    from
+        Member member1 */ select
+            member0_.member_id as member_id1_1_,
+            member0_.age as age2_1_,
+            member0_.team_id as team_id4_1_,
+            member0_.username as username3_1_ 
+        from
+            member member0_
+```
+
+### **정렬**
+
+```java
+List<Member> result = queryFactory
+          .selectFrom(member)
+          .where(member.age.eq(100)
+          .orderBy(member.age.desc(), memeber.username.asc().nullLast())
+          .fetch()''
+```
+
+- desc(), asc(); 일반 정렬
+- nullLast(), nullFirst(): null 데이터 순서 부여
+
+### **페이징**
+
+**1)조회건수 제한**
+
+```java
+@Test
+public void pageing1() {
+     List<Member> result = queryFactory
+                .seletctFrom(member)
+                .orderBy(member.username.desc())
+                .offset(1) //0부터 시작
+                .limit(2) // 최대 2건 조회
+                .fetch();
+}             
+```
+
+**2)전체 조회 수가 필요하면?**
+
+```java
+@Test
+public void pageing2(){
+     QueryResults<Member> queryResults = queryFactory
+                .selectFrom(member)
+                .orderBy(member.username.desc())
+                .offset(1)
+                .limit(2)
+                .fetchResults();
+}
+```
+
+→ count 쿼리까지 같이 실행됨
+
+**→ count 쿼리도 조인을 해버리기 때문에 분리하는 것이 좋음**
+
+### 집합
+
+1**)집합 함수**
+
+```java
+@Test
+public void aggregation() throws Exception {
+
+     List<Tuple> result = queryFactory
+              .select(member.count(),
+                      member.age.sum(),
+                      member.age.avg(),       
+                      member.age.max(),
+                      member.age.min())
+              .from(member)
+              .fetch();
+```
+
+실행 쿼리
+
+```sql
+select
+            count(member0_.member_id) as col_0_0_,
+            sum(member0_.age) as col_1_0_,
+            avg(member0_.age) as col_2_0_,
+            max(member0_.age) as col_3_0_,
+            min(member0_.age) as col_4_0_ 
+        from
+            member member0_
+```
+
+**2)GroupBy 사용**
+
+```java
+@Test
+public void group() throws Exception{
+    List<Tuple> result = queryFactory
+                .select(team.name, member.age.avg())
+                .from(member)
+                .join(member.team, team)
+                .groupBy(team.name)
+                .fetch();
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.groupBy(item.price)
+.having(item.price.gt(1000))
+```
+
+### 조인 - 기본조인
+
+**사용법 : join(조인 대상, 별칭으로 사용할 Q타입)**
+
+**기본조인**
+
+```java
+@Test
+public void join() throws Exception { 
+     QMember member = QMember.member;
+     QTeam team = QTeam.team;
+
+     List<Member> result = queryFactory
+              .selectFrom(member)
+              .join(member.team, team)
+              .where(team.name.eq("teamA"))
+              .fetch();
+}
+```
+
+- join, innerJoin : 내부조인(inner join)
+- leftJoin() : left 외부조인(left outer join)
+- rightJoin() : rigth 외부 조인(rigth outer join)
+
+실행쿼리
+
+```sql
+select
+            member0_.member_id as member_id1_1_,
+            member0_.age as age2_1_,
+            member0_.team_id as team_id4_1_,
+            member0_.username as username3_1_ 
+        from
+            member member0_ 
+        inner join
+            team team1_ 
+                on member0_.team_id=team1_.id 
+        where
+            team1_.name=?
+```
+
+**세타조인(연관관계가 없는 필드로 조인)**
+
+```java
+@Test
+public void theta_join() throws Exception {
+
+     List<Member> result = queryFactory
+                  .select(member)
+                  .from(member, team)
+                  .where(member.username.eq(team.name))
+                  .fetch();
+}
+
+```
+
+- from 절에 여러 엔티티를 선택해서 세타조인
+- 외부 조인 불가능..
+
+```sql
+select
+            member0_.member_id as member_id1_1_,
+            member0_.age as age2_1_,
+            member0_.team_id as team_id4_1_,
+            member0_.username as username3_1_ 
+        from
+            member member0_ cross 
+        join
+            team team1_ 
+        where
+            member0_.username=team1_.name
+```
+
+### 조인 - on절
+
+**조인 대상 필터링**
+
+```java
+public void join_onfiltering() throws Exception {
+
+     List<Tuble> result = queryFactory
+                 .select(member, team)
+                 .from(member)
+                 .leftjoin(member.team, team).on(team.name.eq("teamA"))
+                 .fetch();
+  
+     for(Tuple tuple : result) {
+            System.out.println("tuple = " + tuple);
+     }
+}
+```
+
+실행쿼리
+
+```sql
+select
+            member0_.member_id as member_id1_1_0_,
+            team1_.id as id1_2_1_,
+            member0_.age as age2_1_0_,
+            member0_.team_id as team_id4_1_0_,
+            member0_.username as username3_1_0_,
+            team1_.name as name2_2_1_ 
+        from
+            member member0_ 
+        left outer join
+            team team1_ 
+                on member0_.team_id=team1_.id 
+                and (
+                    team1_.name=?
+                )
+```
+
+→ team 조건에 name 조건이 적용 되서 teamA만 가져오지만 left join 처리가 됨
+
+→ on 대신에 `.where(*team*.name.eq("teamA"))` 을 사용하면 join 이후 필터여서 teamB인 member도 안나옴
+
+**연관관계 없는 엔티티 외부 조인**
+
+```sql
+List<Tuple> result = queryFactory
+               .select(member, team)
+               .from(member)
+               .leftJoin(team).on(member.username.eq(team.name))
+               .fetch();
+```
+
+실행쿼리
+
+```sql
+select
+            member0_.member_id as member_id1_1_0_,
+            team1_.id as id1_2_1_,
+            member0_.age as age2_1_0_,
+            member0_.team_id as team_id4_1_0_,
+            member0_.username as username3_1_0_,
+            team1_.name as name2_2_1_ 
+        from
+            member member0_ 
+        left outer join
+            team team1_ 
+                on (
+                    member0_.username=team1_.name
+                )
+```
+
+### 조인 - 페치조인
+
+**페치 조인 미적용**
+
+```sql
+@PersistenceUnit
+EntityManagerFactory emf;
+
+@Test
+public voic fetchJoinNo() throws Exception{
+     em.flush();
+     em.clear();
+     
+     Memeber findMember = queryFactory
+                .selectFrom(member)
+                .where(member.username.eq("member1")
+                .fetchOne();
+
+```
+
+**페치 조인 적용**
+
+```sql
+@Test
+public void fetchJoinUse() throws Exception {
+      em.flush();
+      em.clear();
+ 
+ Member findMember = queryFactory
+      .selectFrom(member)
+      .join(member.team, team).fetchJoin()
+      .where(member.username.eq("member1"))
+      .fetchOne();
+
+ boolean loaded =
+emf.getPersistenceUnitUtil().isLoaded(findMember.getTeam());
+ assertThat(loaded).as("페치 조인 적용").isTrue();
+```
+
+→ getTeam을 할 경우 따로 쿼리를 실행하지 않는다.
+
+**** 만약 fetchJoin 을 안하다면?**
+
+**→ join을 해서 이미 Team 정보가 있지만 getTeam().getName()을 하면 다시 team을 가져오는 쿼리 실행**
