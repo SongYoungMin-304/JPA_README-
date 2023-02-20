@@ -3027,3 +3027,230 @@ emf.getPersistenceUnitUtil().isLoaded(findMember.getTeam());
 **** 만약 fetchJoin 을 안하다면?**
 
 **→ join을 해서 이미 Team 정보가 있지만 getTeam().getName()을 하면 다시 team을 가져오는 쿼리 실행**
+
+
+### 서브쿼리
+
+com.querydsl.jpa.JPAExpressions 사용
+
+**서브쿼리 eq 사용**
+
+```java
+@Test
+public void subQuery() throws Exception{
+     QMember memberSub = new QMember("memberSub")
+    
+     List<Member> result = queryFactory
+              .selectFrom(member)
+              .where(member.age.eq(
+                      JPAExpressions
+                               .select(memberSub.age.max())
+                               .from(memberSub)
+               ))
+               .fetch();
+```
+
+쿼리실행
+
+```sql
+select
+            member0_.member_id as member_id1_1_,
+            member0_.age as age2_1_,
+            member0_.team_id as team_id4_1_,
+            member0_.username as username3_1_ 
+        from
+            member member0_ 
+        where
+            member0_.age=(
+                select
+                    max(member1_.age) 
+                from
+                    member member1_
+            )
+```
+
+**서브쿼리 goe사용**
+
+```java
+@Test
+public void subQueryGoe() throws Exception {
+ QMember memberSub = new QMember("memberSub");
+ 
+ List<Member> result = queryFactory
+     .selectFrom(member)
+     .where(member.age.goe(
+         JPAExpressions
+            .select(memberSub.age.avg())
+            .from(memberSub)
+ ))
+ .fetch();
+ assertThat(result).extracting("age")
+ .containsExactly(30,40);
+}
+```
+
+쿼리 실행
+
+```sql
+select
+            member0_.member_id as member_id1_1_,
+            member0_.age as age2_1_,
+            member0_.team_id as team_id4_1_,
+            member0_.username as username3_1_ 
+        from
+            member member0_ 
+        where
+            member0_.age>=(
+                select
+                    avg(member1_.age) 
+                from
+                    member member1_
+            )
+```
+
+**서브쿼리 여러 건 처리 in 사용**
+
+```java
+@Test
+public void subQueryIn() throws Exception {
+    QMember memberSub = new QMember("memberSub");
+
+    List<Member> result = queryFactory
+              .selectFrom(member)
+              .where(member.age.in(
+                      JPAExpressions
+                           .select(memberSub.age)
+                           .from(memberSub)
+                           .where(memberSub.age.gt(10))
+                      ))
+                      .fetch();
+}
+```
+
+**select 절에 subquery**
+
+```java
+List<Tuble> fetch = queryFactory
+           .select(member.username,
+                   JPAExpressions
+                         .select(memberSub.age.avg())
+                         .from(memberSub)
+                   ).from(member)
+                   .fetch();
+}
+```
+
+실행쿼리
+
+```sql
+select
+            member0_.username as col_0_0_,
+            (select
+                avg(member1_.age) 
+            from
+                member member1_) as col_1_0_ 
+        from
+            member member0_
+```
+
+**static import 활용**
+
+```java
+import static com.querydsl.jpa.JPAExpressions.select;
+
+List<Member> resulkt = queryFactroy
+             .selectFrom(member)
+             .where(member.age.eq(
+                     select(memberSub.age.max())
+                          .from(memberSub)
+           ))
+           .fetch();
+
+```
+
+**** from 절의 서브쿼리(인라인 뷰) 지원 x**
+
+해결 방안
+
+1. 서브쿼리를 join으로 변경한다.
+2. 애플리케이션에서 쿼리를 2번 분리해서 실행한다.
+3. nativeSQL을 사용한다.
+
+### Case 문
+
+**select, 조건절(where), order by에서 사용 가능**
+
+1) 단순한 조건
+
+```java
+List<String> result = queryFactory
+            .select(member.age)
+                     .when(10).then("열살")
+                     .when(20).then("스무살")
+                     .otherwise("기타"))
+            .from(member)
+            .fetch();
+```
+
+2) 복잡한 조건
+
+```java
+List<String> result = queryFactory
+             .select(new CaseBuilder()
+                     .when(member.age.between(0,20)).then("0~20살")
+                     .when(member.age.between(21,30)).then("21~30살")
+                     .otherwise("기타"))
+             .from(member)
+             .fetch();
+```
+
+3) orderBy + case 문
+
+1. 0 ~ 30살이 아닌 회원을 가장 먼저 출력
+2. 0 ~ 20살 회원 출력
+3. 21 ~ 30살 회원 출력
+
+```sql
+select
+            member0_.username as col_0_0_,
+            member0_.age as col_1_0_,
+            case 
+                when member0_.age between ? and ? then ? 
+                when member0_.age between ? and ? then ? 
+                else 3 
+            end as col_2_0_ 
+        from
+            member member0_ 
+        order by
+            case 
+                when member0_.age between ? and ? then ? 
+                when member0_.age between ? and ? then ? 
+                else 3 
+            end desc
+```
+
+### 상수, 문자 더하기
+
+**상수가 필요하면 Expressions.constant(xxx) 사용**
+
+```sql
+Tuple result = queryFactory
+          .select(member.username, Expressions.constant("A"))
+          .FROM(member)
+          .fetchFirst();
+```
+
+→ 위와 같이 최적화가 가능하면 sql에 constant 값을 넘기지 않는다.(자바에서 처리)
+
+**문자 더하기 concat**
+
+```sql
+String result = queryFactory
+          .select(member.username.concat("_"),concat(member.age.stringValue()))
+          .from(member)
+          .where(memeber.username.eq("member1"))
+          .fetchOne();
+```
+
+참고: member.age.stringValue() 부분이 중요한데, 문자가 아닌 다른 타입들은 stringValue() 로
+문자로 변환할 수 있다. 이 방법은 ENUM을 처리할 때도 자주 사용한다
