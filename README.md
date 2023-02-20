@@ -3254,3 +3254,611 @@ String result = queryFactory
 
 참고: member.age.stringValue() 부분이 중요한데, 문자가 아닌 다른 타입들은 stringValue() 로
 문자로 변환할 수 있다. 이 방법은 ENUM을 처리할 때도 자주 사용한다
+
+
+
+## 중급 문법
+
+### 프로젝션과 결과 반환 - 기본
+
+**프로젝션 대상이 하나**
+
+```java
+List<String> result = queryFactory
+             .select(member.username)
+             .from(member)
+             .fetch();
+         
+```
+
+- 프로젝션 대상이 하나면 타입을 명확하게 지정할 수 있음
+- 프로젝션 대상이 둘 이상이면 튜플이나 dto로 조회
+
+**프로젝션 대상이 둘 이상일 때 사용**
+
+```java
+List<Tuple> result = queryFactory
+        .select(member.username, member.age)
+        .from(member)
+        .fetch();
+
+for(Tuple tuple : result) {
+    String username = tuple.get(member.username);
+    Integer age = tuple.get(member.age);
+
+    System.out.println("username=" + username);
+    System.out.println("age=" + age);
+}
+```
+
+### 프로젝션과 결과 반환 - DTO 조회
+
+**순수 JPA에서 DTO 조회 코드**
+
+```java
+List<MemberDto> result = em.createQuery(
+    "select new study.querydsl.dto.MemberDto(m.username, m.age) " +
+          "from Member m",MemberDto.class)
+       .getResultList();
+```
+
+1) 프로퍼티 접근 setter
+
+```java
+List<MemberDto> result = queryFactory
+         .select(Projections.bean(MemberDto.class,
+                 member.username,
+                 member.age))
+         .from(member)
+         .fetch();
+```
+
+2) 필드 직접 접근
+
+```java
+List<MemberDto> result = queryFactory
+         .select(Projections.fields(MemberDto.class,
+                 member.username,
+                 member.age))
+         .from(member)
+         .fetch();
+```
+
+3) 별칭이 다른 때
+
+```java
+package study.querydsl.dto;
+import lombok.Data;
+
+@Data
+public class UserDto {
+ 
+ private String name;
+ private int age;
+
+}
+```
+
+```java
+List<UserDto> fetch = queryFactory
+        .select(Projections.fiedls(UserDto.class,
+                     member.username.as("name"),
+                     ExpressionUtils.as(
+                               JPAExpressions
+                                  .select(memberSub.age.max())
+                                  .from(memberSub),"age")
+                     )
+          ).from(member)
+          .fetch();
+```
+
+→ dto의 이름이 다른 경우에 사용
+
+→ [ExpressionUtils.as](http://expressionutils.as/)(source,alias) : 필드나, 서브 쿼리에 별칭 적용
+→ [username.as](http://username.as/)("memberName") : 필드에 별칭 적용
+
+4) 생성자 사용
+
+```java
+List<MemberDto> result = queryFactory
+           .select(Projections.constructor(MemberDto.class,
+                         member.username,
+                         member.age))
+           .from(member)
+           .fetch();
+}
+```
+
+### 프로젝션과 결과 반환 - @QueryProjection
+
+**생성자 + @QueryProjection**
+
+```java
+@Data
+public class MemberDto{
+     private String username;
+     private int age;
+
+     public MemberDto(){
+     }
+ 
+     @QueryProjection
+     public MemberDto(String username, int age){
+         this.username = username;
+         this.age = age;
+     }
+}
+```
+
+**@QueryProjection 활용**
+
+```java
+List<MemberDto> result = queryFactory
+          .select(new QMemberDto(member.username, member.age))
+          .from(member)
+          .fetch()
+```
+
+### 동적 쿼리 - BooleanBuilder 사용
+
+```java
+@Test
+public void 동적쿼리_BooleanBuilder() throws Exception {
+     String usernameParam = "member1";
+     Integer ageParam = 10;
+
+     List<Member> result = searchMember1(usernameParam, ageParam);
+     Assertions.asserThan(result.size()).isEqualTo(1);
+}
+
+public List<Member> searchMember1(String usernameCond, Integer ageCond) {
+      BooleanBuilder builder = new BooleanBuilder();
+      if(usernameCond != null){
+         builder.and(member.username.eq(usernameCond));
+      }
+
+      if(ageCond != null){
+         builder.and(member.age.eq(ageCond));
+      }
+      return queryFactory
+                .selectFrom(member)
+                .where(builder)
+                .fetch();
+}
+```
+
+### 동적 쿼리 - Where 다중 파라미터사용
+
+```java
+@Test
+public void 동적쿼리_BooleanBuilder() throws Exception {
+     String usernameParam = "member1";
+     Integer ageParam = 10;
+
+     List<Member> result = searchMember2(usernameParam, ageParam);
+     Assertions.asserThan(result.size()).isEqualTo(1);
+}
+
+public List<Member> searchMember2(String usernameCond, Integer ageCond) {
+      return queryFactory
+                .selectFrom(member)
+                .where(usernameEq(usernameCond), ageEq(ageCond))
+                .fetch();
+}
+
+private BooleanExpression usernameEq(String usernameCond) {
+     return usernameCond != null ? member.username.eq(usernameCode) : null;
+}
+
+private BooleanExpression ageEq(Integer ageCode) {
+     return ageCond !=null ? member.age.eq(ageCond) : null;
+}
+
+// 조합 가능
+private BooleanExpression allEq(String usernameCond, Integer ageCond) {
+     return usernameEq(usernameCond).and(ageEq(ageCond));
+}
+```
+
+### 수정, 삭제 벌크 연산
+
+ **쿼리 한번으로 대량 데이터 수정**
+
+```java
+long count = queryFactory
+       .update(member)
+       .set(member.username, "비회원")
+       .where(member.age.lt(28))
+       .execute();
+```
+
+**기존 숫자에 1 더하기**
+
+```java
+long count = queryFactory
+         .update(member)
+         .set(member.age, member.age.add(1))
+         .execute();
+```
+
+**쿼리 한번으로 대량 데이터 삭제**
+
+```java
+long count = queryFactory
+           .delete(member)
+           .where(member.age.gt(18))
+           .execute();
+```
+
+### SQL function 호출하기
+
+**1) member → M으로 변경하는 replace 함수 사용**
+
+```java
+String result = queryFactory 
+            .select(Expressions.stringTemplate("function('replace',{0},{1},{2})",
+             member.username, "member", "M"))
+            .from(member)
+            .fetchFirst();
+```
+
+**2) 소문자로 변경해서 비교해라**
+
+```java
+.select(member.username)
+.from(member)
+.where(member.username.eq(Expressions.stringTemplate("function('lower',{0})",
+member.username)))
+```
+
+## 실무 활용 - 순수 JPA와 Querydsl
+
+### 순수 JPA 리포지토리와 Querydsl
+
+```java
+private final EntityManager em;
+private final JPAQueryFactory queryFactory;
+
+public MemberJpaRepository(EntityManager em){
+     this.em = em;
+     this.queryFactory = neq JPAQueryFactory(em);
+}
+```
+
+**순수 JPA**
+
+```java
+public void save(Member member){
+     em.persist(member);
+}
+
+public Optional<Member> findById(Long id) {
+    Member findMember = em.find(Member.class, id);
+    return Optional.ofNullable(findMember);
+}
+
+public List<Member> findAll()  {
+    return em.createQuery("select m from Member m", Member.class)
+           .getResultList();
+}
+
+public List<Member> findByUsername(String username){
+    return em.createQuery("select m from Member m where m.username = :username",Member.class)
+            .setParameter("username",username)
+            .getResultList();
+}
+```
+
+**QueryDsl**
+
+```java
+public List<Member> findAll_Querydsl(){
+    return queryFactory
+            .selectFrom(member).fetch();
+}
+
+public List<Member> findByUsername_Querydsl(String username){
+    return queryFactory
+            .selectFrom(member)
+            .where(member.username.eq(username))
+            .fetch();
+}
+```
+
+### 동적 쿼리와 성능 최적화 조회 - Builder 사용
+
+**1) MemberTeamDto - 조회 최적화용 DTO 추가**
+
+```java
+@Data
+public class MemberTeamDto{
+     private Long memberId;
+     private String username;
+     private int age;
+     private Long teamId;
+     private String teamName;
+
+     @QueryProjection
+     public MemberTeamDto(Long memberId, String username, int age, Long teamId, String teamName) {
+         this.memberId = memberId;
+         this.username = username;
+         this.age = age;
+         this.teamId = teamId;
+         this.teamName = teamName;
+ }
+```
+
+**2) 회원 검색조건**
+
+```java
+@Data
+public class MemberSearchCondition {
+ //회원명, 팀명, 나이(ageGoe, ageLoe)
+ private String username;
+ private String teamName;
+ private Integer ageGoe;
+ private Integer ageLoe;
+}
+```
+
+**3) Builder 를 사용한 예정**
+
+```java
+public List<MemberTeamDto> searchByBuilder(MemberSearchCondition condition){
+
+      BooleanBuilder builder = new BooleanBuilder();
+
+      if(hasText(condition.getUsername())){
+          builder.and(member.username.eq(condition.getUsername()));
+      }
+
+      if (hasText(condition.getTeamName())) {
+          builder.and(team.name.eq(condition.getTeamName()));
+      }
+ 
+      if (condition.getAgeGoe() != null) {
+          builder.and(member.age.goe(condition.getAgeGoe()));
+      }
+
+      if (condition.getAgeLoe() != null) {
+          builder.and(member.age.loe(condition.getAgeLoe()));
+      }
+
+    return queryFactory
+           .select(new QMemberTeamDto(
+                    member.id,
+                    member.username,
+                    member.age,
+                    team.id,
+                    team.name))
+           .from(member)
+           .leftJoin(member.team, team)
+           .where(builder)
+           .fetch();
+```
+
+### 동적 쿼리와 성능 최적화 조회 - Where절 파라미터 사용
+
+```java
+//회원명, 팀명, 나이(ageGoe, ageLoe)
+public List<MemberTeamDto> search(MemberSearchCondition condition) {
+ return queryFactory
+      .select(new QMemberTeamDto(
+      member.id,
+      member.username,
+      member.age,
+      team.id,
+      team.name))
+      .from(member)
+      .leftJoin(member.team, team)
+      .where(usernameEq(condition.getUsername()),
+       teamNameEq(condition.getTeamName()),
+       ageGoe(condition.getAgeGoe()),
+       ageLoe(condition.getAgeLoe()))
+      .fetch();
+}
+
+private BooleanExpression usernameEq(String username) {
+ return isEmpty(username) ? null : member.username.eq(username);
+}
+
+private BooleanExpression teamNameEq(String teamName) {
+ return isEmpty(teamName) ? null : team.name.eq(teamName);
+}
+
+private BooleanExpression ageGoe(Integer ageGoe) {
+ return ageGoe == null ? null : member.age.goe(ageGoe);
+}
+
+private BooleanExpression ageLoe(Integer ageLoe) {
+ return ageLoe == null ? null : member.age.loe(ageLoe);
+}
+```
+
+→ where 절에 파리미터 방식을 사용하면 조건 재사용 가능
+
+## 사용자 정의 리포지토리
+
+**1) 사용자 정의 인터페이스 작성**
+
+**2) 사용자 정의 인터페이스 구현**
+
+**3) 스프링 데이터 리포지토리에 사용자 정의 인터페이스 상속**
+
+![image](https://user-images.githubusercontent.com/56577599/220109964-9ab33068-a813-4034-b43c-51268972a87b.png)
+
+
+**1) 사용자 정의 인터페이스 작성**
+
+```java
+public interface MemberRepositoryCustom {
+
+     List<MemberTeamDto> search(MemberSearchCondition condition);
+
+}
+```
+
+**2) 사용자 정의 인터페이스 구현**
+
+```java
+public class MemberRepositoryImpl implements MemberRepositoryCustom {
+ 
+      private final JPAQueryFactory queryFactory;
+      public MemberRepositoryImpl(EntityManager em) {
+           this.queryFactory = new JPAQueryFactory(em);
+      }
+
+      @Override
+      //회원명, 팀명, 나이(ageGoe, ageLoe)
+      public List<MemberTeamDto> search(MemberSearchCondition condition) {
+           return queryFactory
+      .select(new QMemberTeamDto(
+           member.id,
+           member.username,
+           member.age,
+           team.id,
+           team.name))
+           .from(member)
+           .leftJoin(member.team, team)
+           .where(usernameEq(condition.getUsername()),
+           teamNameEq(condition.getTeamName()),
+           ageGoe(condition.getAgeGoe()),
+           ageLoe(condition.getAgeLoe()))
+           .fetch();
+      }
+ 
+      private BooleanExpression usernameEq(String username) {
+           return isEmpty(username) ? null : member.username.eq(username);
+      }
+
+      private BooleanExpression teamNameEq(String teamName) {
+           return isEmpty(teamName) ? null : team.name.eq(teamName);
+      }
+
+      private BooleanExpression ageGoe(Integer ageGoe) {
+           return ageGoe == null ? null : member.age.goe(ageGoe);
+      }
+ 
+      private BooleanExpression ageLoe(Integer ageLoe) {
+           return ageLoe == null ? null : member.age.loe(ageLoe);
+      }
+}
+```
+
+**3) 스프링 데이터 리포지토리에 사용자 정의 인터페이스 상속**
+
+```java
+public interfact MemberRepository extends JpaRepository<Member, Long>, MemberRepositoryCustom{
+
+     List<Member> findByUsername(String username);
+}
+```
+
+## 스프링 데이터 페이징 활용1 - Querydsl 페이징 연동
+
+```java
+public interface MemberRepositoryCustom { 
+
+     List<MemberTeamDto> search(MemberSearchCondition condition);
+
+     Page<MemberTeamDto> searchPageSimple(MemberSearchCondition condition, Pageable pageable);
+
+     Page<MemberTeamDto> searchPageComplex(MemberSearchCondition condition, Pageable pageable);
+```
+
+### 1) 전체 카운트를 한번에 조회하는 단순한 방법
+searchPageSimple(), fetchResults() 사용
+
+```java
+@Override
+public Page<MemberTeamDto> searchPageSimple(MemberSearchCondition condition, Pageable pageable)
+{
+ 
+QueryResults<MemberTeamDto> results = queryFactory
+                  .select(new QMemberTeamDto(
+                         member.id,
+                         member.username,
+                         member.age,
+                         team.id,
+                         team.name))
+                  .from(member)
+                  .leftJoin(member.team, team)
+                  .where(usernameEq(condition.getUsername()),
+                         teamNameEq(condition.getTeamName()),
+                         ageGoe(condition.getAgeGoe()),
+                         ageLoe(condition.getAgeLoe()))
+                    .offset(pageable.getOffset())
+                    .limit(pageable.getPageSize())
+                    .fetchResults();
+
+ List<MemberTeamDto> content = results.getResults();
+ long total = results.getTotal();
+ 
+ return new PageImpl<>(content, pageable, total);
+}
+```
+
+→ fetchResults를 사용하면 내용과 전체 카운트를 한번에 조회 할 수 있다.(실제 쿼리는 2번 호출)
+
+### 2) 데이터 내용과 전체 카운트를 별도로 조회하는 방법
+searchPageComplex()
+
+```java
+@Override
+public Page<MemberTeamDto> searchPageComplex(MemberSearchCondition condition,
+Pageable pageable) {
+      List<MemberTeamDto> content = queryFactory
+           .select(new QMemberTeamDto(
+                     member.id,
+                     member.username,
+                     member.age,
+                     team.id,
+                     team.name))
+                     .from(member)
+                     .leftJoin(member.team, team)
+                     .where(usernameEq(condition.getUsername()),
+                     teamNameEq(condition.getTeamName()),
+                     ageGoe(condition.getAgeGoe()),
+                     ageLoe(condition.getAgeLoe()))
+                     .offset(pageable.getOffset())
+                     .limit(pageable.getPageSize())
+                     .fetch();
+
+ long total = queryFactory
+                     .select(member)
+                     .from(member)
+                     .leftJoin(member.team, team)
+                     .where(usernameEq(condition.getUsername()),
+                     teamNameEq(condition.getTeamName()),
+                     ageGoe(condition.getAgeGoe()),
+                     ageLoe(condition.getAgeLoe()))
+                     .fetchCount();
+ return new PageImpl<>(content, pageable, total);
+}
+```
+
+→ 데이터 내용 조회
+
+→ 전체카운트를 별도로 조회
+
+### 3) 스프링 데이터 페이징 활용2 - CountQuery 최적화
+
+```java
+JPAQuery<Member> countQuery = queryFactory
+       .select(member)
+       .from(member)
+       .leftJoin(member.team, team)
+       .where(usernameEq(condition.getUsername()),
+ teamNameEq(condition.getTeamName()),
+ ageGoe(condition.getAgeGoe()),
+ ageLoe(condition.getAgeLoe()));
+
+return PageableExecutionUtils.getPage(content, pageable,
+countQuery::fetchCount)
+```
+
+→ count 쿼리를 무조건 실행하는 것이 아니라 필요한 경우에만 호출함
+
+1) 페이지가 시작이면서 컨텐츠 사이즈가 페이지 사이즈보다 작을때
+
+2) 마지막 페이지일때(offset + 컨텐츠 사이즈를 더해서 전체 사이즈 구함)
