@@ -3862,3 +3862,116 @@ countQuery::fetchCount)
 1) 페이지가 시작이면서 컨텐츠 사이즈가 페이지 사이즈보다 작을때
 
 2) 마지막 페이지일때(offset + 컨텐츠 사이즈를 더해서 전체 사이즈 구함)
+
+
+## Querydsl 지원 클래스 직접 만들기
+
+```java
+
+ private final Class domainClass;
+ 
+ private Querydsl querydsl;
+ 
+ private EntityManager entityManager;
+ 
+ private JPAQueryFactory queryFactory; 
+ 
+ protected JPAQueryFactory getQueryFactory() {
+      return queryFactory;
+ }
+
+ protected Querydsl getQuerydsl() {
+      return querydsl;
+ }
+
+ protected EntityManager getEntityManager() {
+      return entityManager;
+ }
+
+ protected <T> JPAQuery<T> select(Expression<T> expr) {
+      return getQueryFactory().select(expr);
+ }
+
+ protected <T> JPAQuery<T> selectFrom(EntityPath<T> from) {
+      return getQueryFactory().selectFrom(from);
+ }
+
+ protected <T> Page<T> applyPagination(Pageable pageable, Function<JPAQueryFactory, JPAQuery> contentQuery) {
+      JPAQuery jpaQuery = contentQuery.apply(getQueryFactory());
+      List<T> content = getQuerydsl().applyPagination(pageable, jpaQuery).fetch();
+      return PageableExecutionUtils.getPage(content, pageable, jpaQuery::fetchCount);
+ }
+
+ protected <T> Page<T> applyPagination(Pageable pageable, Function<JPAQueryFactory, JPAQuery> contentQuery, Function<JPAQueryFactory,JPAQuery> countQuery) {
+      JPAQuery jpaContentQuery = contentQuery.apply(getQueryFactory());
+      List<T> content = getQuerydsl().applyPagination(pageable, jpaContentQuery).fetch();
+      JPAQuery countResult = countQuery.apply(getQueryFactory());
+      return PageableExecutionUtils.getPage(content, pageable, countResult::fetchCount);
+ }
+```
+
+**사용방법**
+
+```java
+@Repository
+public class MemberTestRepository extends Querydsl4RepositorySupport {
+
+     public MemberTestRepository() {
+       super(Member.class);
+     }
+
+     public List<Member> basicSlect(){
+       return select(member)
+                .from(member)
+                .fetch();
+     }
+
+     public Page<Member> searchPageByApplyPage(MemberSearchCondition condition,
+Pageable pageable){
+  
+       JPAQuery<Member> query = selectFrom(member)
+            .leftJoin(member.team, team)
+            .where(usernameEq(condition.getUsername()),
+             teamNameEq(condition.getTeamName()),
+             ageGoe(condition.getAgeGoe()),
+             ageLoe(condition.getAgeLoe()));
+
+        List<Member> content = getQuerydsl().applyPagination(pageable, query)
+                              .fetch();
+ 
+        return PageableExecutionUtils.getPage(content, pageable, 
+        query::fetchCount);
+
+    public Page<Member> applyPagination(MemberSearchCondition condition,
+     Pageable pageable) {
+      return applyPagination(pageable, contentQuery -> contentQuery
+          .selectFrom(member)
+          .leftJoin(member.team, team)
+          .where(usernameEq(condition.getUsername()),
+          teamNameEq(condition.getTeamName()),
+          ageGoe(condition.getAgeGoe()),
+          ageLoe(condition.getAgeLoe())));
+          }
+
+ public Page<Member> applyPagination2(MemberSearchCondition condition,
+Pageable pageable) {
+     return applyPagination(pageable, contentQuery -> contentQuery
+          .selectFrom(member)
+          .leftJoin(member.team, team)
+          .where(usernameEq(condition.getUsername()),
+          teamNameEq(condition.getTeamName()),
+          ageGoe(condition.getAgeGoe()),
+          ageLoe(condition.getAgeLoe())),
+          countQuery -> countQuery
+          .selectFrom(member)
+          .leftJoin(member.team, team)
+          .where(usernameEq(condition.getUsername()),
+          teamNameEq(condition.getTeamName()),
+          ageGoe(condition.getAgeGoe()),
+          ageLoe(condition.getAgeLoe()))
+ );
+ }
+      
+
+     
+```
