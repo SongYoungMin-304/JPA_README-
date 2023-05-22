@@ -3975,3 +3975,114 @@ Pageable pageable) {
 
      
 ```
+
+# chunk tasklet
+
+## tasklet
+
+→ 단계 내에서 단일 태스크를 수행하기 위한 것으로 임의의 Step을 실행할 때 읽기/처리/쓰기를 하나의 작업으로 처리하는 방식
+
+```java
+@Bean(name= JOB_NAME)
+    public Job onlineXmsQueInterfaceJob(Step autoQueSendStep, Step taskletStep, Step simpleTaskletStep,
+                                    AutoQueJobListener autoQueJobListener) {
+        return jobBuilderFactory.get(JOB_NAME)
+                .incrementer(new RunIdIncrementer())
+                .listener(autoQueJobListener)
+                .start(taskletStep)
+                .next(autoQueSendStep)
+                .next(simpleTaskletStep)
+                .build();
+    }
+```
+
+**tasklet 관련 step 세팅**
+
+```java
+@Bean(name="taskletStep")
+    public Step taskletStep(){
+        return stepBuilderFactory.get("taskletStep")
+                .tasklet(tasklet())
+                .build();
+    }
+```
+
+```java
+public Tasklet tasklet() {
+   Tasklet tasklet = new Tasklet() {
+            @Override
+            public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
+                return RepeatStatus.FINISHED;
+            }
+        };
+   
+    return tasklet;
+}
+```
+
+**클래스 분리**
+
+```java
+@Bean(name="simpleTaskletStep")
+    public Step simpleTaskletStep(SimpleTasklet simpleTasklet){
+        return stepBuilderFactory.get("simpleTaskletStep")
+                .tasklet(simpleTasklet)
+                .build();
+    }
+```
+
+```java
+@Component
+public class SimpleTasklet implements Tasklet {
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
+
+        for(int a = 0; a < 100; a++){
+            log.info("송영민송송" + a);
+        }
+        
+        return RepeatStatus.FINISHED;
+    }
+}
+```
+
+람다식으로 표현
+
+```java
+public Tasklet tasklet(){
+        return ((contribution, chunkContext) -> {
+            List<String> items = getItems();
+            log.info("items : "+ items.toString());
+            return RepeatStatus.FINISHED;
+        });
+    }
+```
+
+## Chunk 지향 프로세싱
+
+1) 한 번에 모든 행을 읽고 처리하고 쓰는 대신 한 번에 고정 된 양의 레코드(청크)를 읽고 처리하는 방식,
+2) 트랜잭션 경계 내에서 청크 단위(아이템이 트랜잭션에서 커밋되는 수)로 데이터를 읽고 생성하는 기법
+3)청크를 지정하게 되면 한 건에 실패에 대해 청크부터 뒤에서까지만 영향을 받게 되어 실패한 청크 앞의 영역은 영향을 받지 않는다.  
+4) 또한 청크만큰만 트랜잭션 시간을 가져가지 때문에 트랜잭션 시간을 짥게 가져갈 수 있다.
+
+![image](https://github.com/SongYoungMin-304/JPA_README-/assets/56577599/c64a05d3-68d0-4f76-aaf4-50dbc3c033d7)
+
+```java
+@Bean(name="autoQueSendStep")
+    public Step autoSendStep(
+            @Value("${auto.throttle.limit}00") int throttleLimit,
+            AutoQueProcessor autoQueProcessor,
+            AutoQueItemWriter autoQueItemWriter) throws Exception {
+
+        return stepBuilderFactory.get("autoQueSendStep")
+                .<AutoQueDto, AutoQueDto>chunk(chunkSize)
+                .reader(autoQueItemReader(null,null,null))
+                .processor(autoQueProcessor)
+                .writer(autoQueItemWriter)
+                .taskExecutor(taskExecutor())
+                .throttleLimit(8)
+                //.taskExecutor(dbIntegrationBatchThreadPool)
+                .build();
+    }
+```
